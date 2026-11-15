@@ -242,6 +242,19 @@
   }
 
   // ---------- Главный расчёт дня ----------
+  // Эталон недельного объёма. Пока приложению меньше недели (нет записей за часть окна),
+  // сравниваем с долей плана, а не со всей неделей: иначе первая неделя занижена
+  function planRef(state, date) {
+    const first = Object.keys(state.logs).filter((d) => { const l = state.logs[d]; return l && ((l.food && l.food.length) || l.sleep > 0 || l.weight > 0 || (l.ex && Object.values(l.ex).some((e) => (e.sets || []).some((x) => x > 0)))); }).sort()[0];
+    if (!first || first <= addDays(date, -6)) return TPLAN;
+    const perWeek = Math.max(1, Object.keys(state.schedule || {}).length);
+    let sessions = 0;
+    for (let d = first; d <= date; d = addDays(d, 1)) { const raw = dayRaw(state, d); if ((state.schedule && state.schedule[weekday(d)]) || Object.values(raw).some((v) => v > 0)) sessions++; }
+    const ratio = Math.min(1, sessions / perWeek);
+    if (ratio >= 1) return TPLAN;
+    const sc = {}; for (const g in GROUPS) sc[g] = PLAN_SETS[g] * ratio;
+    return rawT(sc);
+  }
   function computeDay(state, date) {
     const pr = state.profile;
     const Gmax = gmax(pr);
@@ -250,7 +263,8 @@
     const Traw = rawT(sets), Traw0 = rawT(W.noRec);
     let sr = 0, s0 = 0; for (const g in GROUPS) { sr += GROUPS[g].w * W.sets[g]; s0 += GROUPS[g].w * W.noRec[g]; }
     const R = s0 > 0 ? sr / s0 : 1; // восстановление: доля подходов, засчитанных после учёта предыдущего дня
-    const T = Math.min(1, Traw0 / TPLAN) * R;
+    const tplan = planRef(state, date);
+    const T = Math.min(1, Traw0 / tplan) * R;
 
     const ft = foodTotals(state, date);
     const missing = [];
@@ -305,7 +319,7 @@
           const st2 = Object.assign({}, state, { logs: Object.assign({}, state.logs, { [date]: Object.assign({}, L0, { ex: ex2 }) }) });
           const W2 = windowSets(st2, date);
           let a = 0, b = 0; for (const g in GROUPS) { a += GROUPS[g].w * W2.sets[g]; b += GROUPS[g].w * W2.noRec[g]; }
-          const T2 = Math.min(1, rawT(W2.noRec) / TPLAN) * (b > 0 ? a / b : 1);
+          const T2 = Math.min(1, rawT(W2.noRec) / tplan) * (b > 0 ? a / b : 1);
           const g2 = gain(T2, P, E, S);
           if (g2 > 0.05) lim.push({ key: 'train', gain: g2, text: 'Доделать тренировку: осталось ' + left + ' ' + (left % 10 === 1 && left !== 11 ? 'подход' : left % 10 >= 2 && left % 10 <= 4 && (left < 12 || left > 14) ? 'подхода' : 'подходов') });
         }
