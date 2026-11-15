@@ -97,7 +97,7 @@
   function defaultState() {
     const st = {
       v: 1,
-      profile: { weight: 88, height: 195, age: 20, tdee: 3000, level: 0.9, share: 0.45, proteinPerKg: 1.6 },
+      profile: { weight: 88, height: 195, age: 20, tdee: 3000, level: 0.9, share: 0.45, proteinPerKg: 1.6, fatPerKg: 1.0, trainKcal: 300 },
       schedule: { 1: 'A', 3: 'B', 5: 'C' },
       plan: {},
       deload: null,
@@ -221,6 +221,26 @@
 
   const gmax = (p) => (p.level / 100) * p.weight * p.share / 30 * 1000;
 
+  // ---------- Цели по питанию на конкретный день ----------
+  const hasSetsLog = (l) => !!(l && l.ex && Object.values(l.ex).some((e) => (e.sets || []).some((r) => r > 0)));
+  const trainingDay = (state, d) => { const wo = workoutOf(state, d); return hasSetsLog(state.logs[d]) || !!(wo && PLAN[wo]); };
+  // «Расход» в профиле — средний за неделю с тремя тренировками; день тренировки добавляет trainKcal, день отдыха на столько же меньше среднего
+  function dayTDEE(state, d) {
+    const pr = state.profile, ex = pr.trainKcal != null ? pr.trainKcal : 300;
+    const rest = pr.tdee - (3 * ex) / 7;
+    return Math.round(rest + (trainingDay(state, d) ? ex * (deloadOn(state, d) ? 0.6 : 1) : 0));
+  }
+  function targets(state, d) {
+    const pr = state.profile, W = pr.weight, tdee = dayTDEE(state, d), kcal = Math.round(tdee * 1.08);
+    const p = Math.round(pr.proteinPerKg * W), fat = Math.round((pr.fatPerKg || 1) * W);
+    const carb = Math.max(0, Math.round((kcal - 4 * p - 9 * fat) / 4));
+    return { tdee, kcal, train: trainingDay(state, d), p, fat, fatMin: Math.round(0.7 * W), fatMax: Math.round(1.3 * W), carb, carbMin: Math.round(Math.max(3 * W, 0.8 * carb)), carbMax: Math.round(1.2 * carb) };
+  }
+  function nextWorkout(state, date) {
+    for (let i = 1; i <= 7; i++) { const d = addDays(date, i), wo = workoutOf(state, d); if (wo && PLAN[wo]) return { date: d, wo }; }
+    return null;
+  }
+
   // ---------- Главный расчёт дня ----------
   function computeDay(state, date) {
     const pr = state.profile;
@@ -234,12 +254,19 @@
 
     const ft = foodTotals(state, date);
     const missing = [];
-    let P, E, surplus = null;
+    const tg = targets(state, date);
+    let P, E, Eraw = 0.5, comp = 1, surplus = null;
     if (ft.n === 0) { P = 0.5; E = 0.5; missing.push('food'); }
     else {
       P = Math.min(1, ft.p / (pr.proteinPerKg * pr.weight));
-      surplus = (ft.kcal - pr.tdee) / pr.tdee;
-      E = energyScore(surplus);
+      surplus = (ft.kcal - tg.tdee) / tg.tdee;
+      E = Eraw = energyScore(surplus);
+      // Состав: углеводы ниже нормы снижают работоспособность, жиры — гормональный фон (до −10% каждый). Только когда день внесён почти целиком и БЖУ сходятся с калориями
+      if (ft.kcal >= 0.7 * tg.kcal && 4 * (ft.p + ft.c) + 9 * ft.f >= 0.75 * ft.kcal) {
+        const cf = 1 - 0.1 * Math.max(0, Math.min(1, (tg.carbMin - ft.c) / (0.5 * tg.carbMin)));
+        const ff = 1 - 0.1 * Math.max(0, Math.min(1, (tg.fatMin - ft.f) / (0.5 * tg.fatMin)));
+        comp = cf * ff; E = Eraw * comp;
+      }
     }
     const si = sleepInfo(state, date);
     let S = si.S;
@@ -264,15 +291,16 @@
     // Что ограничивает прирост
     const lim = [];
     const gain = (T2, P2, E2, S2) => Gmax * T2 * Math.pow(P2, 0.4) * Math.pow(E2, 0.3) * Math.pow(S2, 0.3) - M;
-    if (T < 0.999) lim.push({ key: 'train', gain: gain(1, P, E, S), text: 'Выполнить план тренировок полностью' });
+    if (T < 0.999 && tg.train) lim.push({ key: 'train', gain: gain(1, P, E, S), text: 'Выполнить план тренировок полностью' });
     if (P < 0.999) lim.push({ key: 'protein', gain: gain(T, 1, E, S), text: ft.n ? 'Добрать белок до ' + Math.round(pr.proteinPerKg * pr.weight) + ' г' : 'Внести питание за день' });
-    if (E < 0.999) lim.push({ key: 'energy', gain: gain(T, P, 1, S), text: ft.n ? (surplus < 0.05 ? 'Добавить калории: цель около ' + Math.round(pr.tdee * 1.08) + ' ккал' : 'Профицит великоват — часть уйдёт в жир') : 'Внести питание за день' });
+    if (Eraw < 0.999) lim.push({ key: 'energy', gain: gain(T, P, comp, S), text: ft.n ? (surplus < 0.05 ? 'Добавить калории: цель на сегодня около ' + tg.kcal + ' ккал' : 'Профицит великоват — часть уйдёт в жир') : 'Внести питание за день' });
+    if (comp < 0.999) lim.push({ key: 'macro', gain: gain(T, P, Eraw, S), text: ft.c < tg.carbMin ? 'Добрать углеводы до ' + tg.carbMin + ' г' : 'Жиры: не меньше ' + tg.fatMin + ' г' });
     if (S < 0.999) lim.push({ key: 'sleep', gain: gain(T, P, E, 1), text: si.S == null ? 'Внести сон' : 'Спать 7,5 ч и больше' });
     if (R < 0.97) lim.push({ key: 'recovery', gain: Gmax * (T / R) * Q - M, text: 'Давать мышцам около 48 часов между тренировками' });
     lim.sort((a, b) => b.gain - a.gain);
 
     const tokens = M - pen;
-    return { Gmax, sets, Traw, T, P, E, S, R, setsEff: total, setsPlan: planTotal, Q, M, opt: Gmax ? (M / Gmax) * 100 : 0, pen, tokens, surplus, food: ft, sleep: si, missing, limiters: lim.filter((l) => l.gain > 0.05), risks };
+    return { Gmax, sets, Traw, T, P, E, S, R, setsEff: total, setsPlan: planTotal, Q, M, opt: Gmax ? (M / Gmax) * 100 : 0, pen, tokens, surplus, tg, comp, rest: !tg.train, next: tg.train ? null : nextWorkout(state, date), food: ft, sleep: si, missing, limiters: lim.filter((l) => l.gain > 0.05), risks };
   }
 
   function weeklyTokens(state, date) {
@@ -418,12 +446,12 @@
 
   // ---------- Что наверстать сегодня ----------
   function catchup(state, date) {
-    const pr = state.profile, kT = Math.round(pr.tdee * 1.08), pT = Math.round(pr.proteinPerKg * pr.weight);
+    const pr = state.profile, tg = targets(state, date), kT = tg.kcal, pT = tg.p;
     const ft = foodTotals(state, date);
     let n = 0, def = 0;
     for (let i = 1; i <= 3; i++) { const f = foodTotals(state, addDays(date, -i)); if (f.n) { n++; def += Math.max(0, pT - f.p); } }
     const si = sleepInfo(state, addDays(date, -1));
-    return { kT, pT, left: { kcal: Math.max(0, kT - ft.kcal), p: Math.max(0, pT - ft.p) }, extraP: n ? Math.min(30, Math.round((def / n) * 0.5)) : 0, sleepMin: si.mean != null && si.mean < 7 ? Math.round(((7.5 - si.mean) * 60) / 2) : 0 };
+    return { kT, pT, left: { kcal: Math.max(0, kT - ft.kcal), p: Math.max(0, pT - ft.p), c: Math.max(0, tg.carb - ft.c), f: Math.max(0, tg.fat - ft.f) }, tg, extraP: n ? Math.min(30, Math.round((def / n) * 0.5)) : 0, sleepMin: si.mean != null && si.mean < 7 ? Math.round(((7.5 - si.mean) * 60) / 2) : 0 };
   }
 
   // ---------- Разбор недели ----------
@@ -431,7 +459,7 @@
     const days = []; for (let i = 6; i >= 0; i--) days.push(computeDay(state, addDays(date, -i)));
     let prev = 0; for (let i = 13; i >= 7; i--) prev += computeDay(state, addDays(date, -i)).tokens;
     const total = sum(days.map((r) => r.tokens)), ideal = days[0].Gmax * 7;
-    const lost = { train: 0, protein: 0, energy: 0, sleep: 0, recovery: 0 };
+    const lost = { train: 0, protein: 0, energy: 0, sleep: 0, recovery: 0, macro: 0 };
     days.forEach((r) => r.limiters.forEach((l) => { lost[l.key] += l.gain; }));
     const logs = []; for (let i = 0; i < 7; i++) logs.push(state.logs[addDays(date, -i)] || {});
     const sess = logs.filter((l) => l.ex && Object.values(l.ex).some((e) => (e.sets || []).some((r) => r > 0))).length;
@@ -444,6 +472,7 @@
       energy: 'Калории: в среднем ' + (avgKcal != null ? Math.round(avgKcal) : '—') + ' при цели ' + kT,
       sleep: 'Сон: в среднем ' + (avgSleep != null ? avgSleep.toFixed(1).replace('.', ',') : '—') + ' ч, цель от 7,5',
       recovery: 'Тренировки шли слишком плотно, мышцы не успевали восстановиться',
+      macro: 'Углеводы или жиры ниже нормы в части дней',
     };
     const items = Object.keys(lost).filter((k) => lost[k] > 0.3).sort((a, b) => lost[b] - lost[a]).map((k) => ({ key: k, g: lost[k], text: text[k] }));
     return { total, prev, ideal, items, sess, avgSleep, avgKcal, avgP, logged: logs.filter((l) => l.ex || (l.food && l.food.length) || l.sleep > 0).length };
@@ -486,5 +515,5 @@
     return { name, kcal, p: num(n.proteins_100g), c: num(n.carbohydrates_100g), f: num(n.fat_100g) };
   }
 
-  return { validBarcode, parseOFF, deloadOn, setsFor, deloadSuggested, restIdeal, painAdvice, catchup, weeklyReview, sleepVsPerformance, WARMUP, COOLDOWN, MOBILITY, PAIN, defaultMeals, slopeOf, weightTrend, estimateTDEE, navyBF, calibration, exerciseProgress, restFactor, workoutOf, projectWeek, windowSets, dayRaw, GROUPS, EXERCISES, PLAN, PLAN_SETS, TPLAN, defaultState, computeDay, weeklyTokens, declining, lastSets, exerciseSessions, groupSets, foodTotals, energyScore, sleepOne, sleepInfo, quality, gmax, weightOn, dstr, parse, addDays, weekday };
+  return { targets, dayTDEE, nextWorkout, trainingDay, validBarcode, parseOFF, deloadOn, setsFor, deloadSuggested, restIdeal, painAdvice, catchup, weeklyReview, sleepVsPerformance, WARMUP, COOLDOWN, MOBILITY, PAIN, defaultMeals, slopeOf, weightTrend, estimateTDEE, navyBF, calibration, exerciseProgress, restFactor, workoutOf, projectWeek, windowSets, dayRaw, GROUPS, EXERCISES, PLAN, PLAN_SETS, TPLAN, defaultState, computeDay, weeklyTokens, declining, lastSets, exerciseSessions, groupSets, foodTotals, energyScore, sleepOne, sleepInfo, quality, gmax, weightOn, dstr, parse, addDays, weekday };
 });

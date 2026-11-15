@@ -1,4 +1,4 @@
-const CACHE = 'rost-v4';
+const CACHE = 'rost-v5';
 const FILES = ['./', 'index.html', 'core.js', 'app.js', 'manifest.json', 'icon-180.png', 'icon-512.png'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((k) => Promise.all(k.filter((x) => x !== CACHE).map((x) => caches.delete(x)))).then(() => self.clients.claim())); });
