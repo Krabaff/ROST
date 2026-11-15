@@ -39,6 +39,53 @@
     C: { name: 'Верх C · плечи и спина', ex: ['pullup_wide', 'dips', 'band_press', 'band_lateral', 'band_curl', 'band_pushdown'] },
   };
 
+  const PROG = {
+    pullup_band: ['Резинка слабее', 'Пауза 2 с вверху', 'Медленный негатив 4 с'],
+    chinup: ['Пауза 2 с вверху', 'Негатив 4 с', 'Узкий хват'],
+    pullup_wide: ['Негатив 4 с', 'Пауза 2 с вверху', 'Хват ещё шире'],
+    dips: ['Пауза 2 с внизу', 'Негатив 3–4 с', 'Вес в рюкзаке'],
+    dips_tri: ['Пауза 2 с внизу', 'Негатив 3–4 с', 'Вес в рюкзаке'],
+    pushup_feet: ['Ноги выше', 'Пауза 2 с внизу', 'Рюкзак с весом'],
+    band_row: ['Резинка жёстче', 'Пауза 2 с', 'Одной рукой'],
+    pike_pushup: ['Ноги выше', 'Пауза 2 с внизу', 'Негатив 4 с'],
+    band_press: ['Резинка жёстче', 'Пауза 2 с', 'Попеременно'],
+    band_lateral: ['Резинка жёстче', 'Пауза 2 с вверху', 'Медленный негатив'],
+    band_facepull: ['Резинка жёстче', 'Пауза 2 с', 'Больше повторов'],
+    band_curl: ['Резинка жёстче', 'Пауза в середине', 'Негатив 4 с'],
+    band_hammer: ['Резинка жёстче', 'Пауза в середине', 'Негатив 4 с'],
+    band_pushdown: ['Резинка жёстче', 'Пауза 2 с внизу', 'Одной рукой'],
+    band_overhead_ext: ['Резинка жёстче', 'Пауза 2 с внизу', 'Одной рукой'],
+  };
+  for (const id in PROG) EXERCISES[id].prog = PROG[id];
+
+  const WARMUP = [
+    ['Круги руками', '20 вперёд и 20 назад, постепенно шире'],
+    ['Разведение резинки перед собой', '2×15, лопатки сводить'],
+    ['Лопаточные подтягивания на турнике', '2×8: только лопатки вниз, руки прямые'],
+    ['Круги кистями и сгибания запястий', '20 секунд'],
+    ['Лёгкие отжимания или подтягивания', '1 подход на 50% усилия, 8–10 повторов'],
+  ];
+  const COOLDOWN = [
+    ['Грудь в проёме двери или у брусьев', '2×30 секунд'],
+    ['Вис на турнике', '30–45 секунд, плечи расслаблены'],
+    ['Трицепс: рука за головой', '2×30 секунд на сторону'],
+    ['Бицепс: ладонь на опоре, разворот корпуса', '2×30 секунд на сторону'],
+  ];
+  const MOBILITY = [
+    ['Скольжение по стене (wall slides)', '2×10, спина и локти прижаты'],
+    ['Выкруты с резинкой или палкой', '2×10 медленно'],
+    ['Разгибание грудного отдела на валике или стуле', '1 минута'],
+    ['Круги в плечевом суставе стоя (CARs)', '5 в каждую сторону'],
+    ['Вис на турнике', '2×30 секунд'],
+  ];
+  const PAIN = { elbow: 'Локоть', shoulder: 'Плечо', wrist: 'Запястье', back: 'Спина' };
+  const PAIN_EX = {
+    elbow: ['band_curl', 'band_hammer', 'band_pushdown', 'band_overhead_ext', 'dips_tri', 'chinup'],
+    shoulder: ['pike_pushup', 'band_press', 'band_lateral', 'dips', 'dips_tri', 'pullup_wide'],
+    wrist: ['pushup_feet', 'pike_pushup', 'band_curl', 'band_hammer'],
+    back: ['pullup_band', 'pullup_wide', 'chinup', 'band_row'],
+  };
+
   // ---------- Даты ----------
   const pad = (n) => (n < 10 ? '0' : '') + n;
   const dstr = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -48,11 +95,14 @@
 
   // ---------- Состояние ----------
   function defaultState() {
-    return {
+    const st = {
       v: 1,
       profile: { weight: 88, height: 195, age: 20, tdee: 3000, level: 0.9, share: 0.45, proteinPerKg: 1.6 },
       schedule: { 1: 'A', 3: 'B', 5: 'C' },
       plan: {},
+      deload: null,
+      barcodes: {},
+      meals: [],
       logs: {},
       foods: [
         { name: 'Куриная грудка', unit: '100 г', kcal: 165, p: 31, c: 0, f: 3.6 },
@@ -67,6 +117,18 @@
         { name: 'Макароны варёные', unit: '100 г', kcal: 158, p: 5.8, c: 31, f: 0.9 },
       ],
     };
+    st.meals = defaultMeals(st.foods);
+    return st;
+  }
+
+  function defaultMeals(foods) {
+    const mk = (name, q) => { const f = foods.find((x) => x.name === name); return { name: q === 1 ? f.name : f.name + ' ×' + q, kcal: f.kcal * q, p: f.p * q, c: f.c * q, f: f.f * q }; };
+    return [
+      { name: 'Завтрак', items: [mk('Овсянка сухая', 0.6), mk('Яйцо', 3), mk('Банан', 1), mk('Молоко 2.5%', 1)] },
+      { name: 'Обед', items: [mk('Куриная грудка', 2), mk('Рис варёный', 2)] },
+      { name: 'Перекус', items: [mk('Творог 5%', 2), mk('Банан', 1)] },
+      { name: 'Шейк', items: [mk('Протеин', 1), mk('Молоко 2.5%', 1), mk('Банан', 1)] },
+    ];
   }
 
   const getLog = (state, date) => state.logs[date] || {};
@@ -88,7 +150,7 @@
       const e = log.ex[id];
       const q = quality(e.rir == null ? 2 : e.rir) * restFactor(id, e.rest);
       const done = (e.sets || []).filter((r) => r > 0).length;
-      for (const g in ex.g) out[g] += done * q * ex.g[g];
+      for (const g in ex.g) out[g] += done * q * (log.deload ? 1.6 : 1) * ex.g[g];
     }
     return out;
   }
@@ -271,8 +333,8 @@
       const real = state.logs[d] || {}, log = Object.assign({}, real), wo = workoutOf(state, d);
       const hasSets = real.ex && Object.values(real.ex).some((e) => (e.sets || []).some((r) => r > 0));
       if (!hasSets) {
-        delete log.ex;
-        if (wo && PLAN[wo]) { log.ex = {}; for (const id of PLAN[wo].ex) { const ex = EXERCISES[id]; log.ex[id] = { rir: 2, sets: Array(ex.sets).fill(Math.round((ex.reps[0] + ex.reps[1]) / 2)) }; } }
+        delete log.ex; log.deload = deloadOn(state, d);
+        if (wo && PLAN[wo]) { log.ex = {}; for (const id of PLAN[wo].ex) { const ex = EXERCISES[id]; log.ex[id] = { rir: 2, sets: Array(setsFor(state, d, id)).fill(Math.round((ex.reps[0] + ex.reps[1]) / 2)) }; } }
       }
       const ft = foodTotals(state, d);
       if (i === 0 && ft.n) { if (ft.kcal < A.kcal || ft.p < A.p) log.food = [{ name: 'прогноз', kcal: Math.max(ft.kcal, A.kcal), p: Math.max(ft.p, A.p), c: 0, f: 0 }]; }
@@ -338,5 +400,91 @@
     return out;
   }
 
-  return { slopeOf, weightTrend, estimateTDEE, navyBF, calibration, exerciseProgress, restFactor, workoutOf, projectWeek, windowSets, dayRaw, GROUPS, EXERCISES, PLAN, PLAN_SETS, TPLAN, defaultState, computeDay, weeklyTokens, declining, lastSets, exerciseSessions, groupSets, foodTotals, energyScore, sleepOne, sleepInfo, quality, gmax, weightOn, dstr, parse, addDays, weekday };
+  // ---------- Разгрузка ----------
+  const deloadOn = (state, d) => !!(state.deload && d >= state.deload.from && d <= state.deload.to);
+  const setsFor = (state, d, id) => (deloadOn(state, d) ? Math.max(2, Math.ceil(EXERCISES[id].sets / 2)) : EXERCISES[id].sets);
+  // Разгрузка предлагается, если повторы падают сразу в нескольких упражнениях
+  const deloadSuggested = (state, date) => !deloadOn(state, date) && declining(state, date).length >= 2;
+  const restIdeal = (id) => (COMPOUND.has(id) ? 120 : 60);
+
+  // ---------- Боль ----------
+  function painAdvice(state, date) {
+    const tags = new Set();
+    for (let i = 0; i < 3; i++) for (const t of (getLog(state, addDays(date, -i)).pain || [])) tags.add(t);
+    if (!tags.size) return null;
+    const ex = new Set(); tags.forEach((t) => (PAIN_EX[t] || []).forEach((id) => ex.add(id)));
+    return { tags: [...tags].map((t) => PAIN[t]), ex: [...ex].map((id) => EXERCISES[id].name) };
+  }
+
+  // ---------- Что наверстать сегодня ----------
+  function catchup(state, date) {
+    const pr = state.profile, kT = Math.round(pr.tdee * 1.08), pT = Math.round(pr.proteinPerKg * pr.weight);
+    const ft = foodTotals(state, date);
+    let n = 0, def = 0;
+    for (let i = 1; i <= 3; i++) { const f = foodTotals(state, addDays(date, -i)); if (f.n) { n++; def += Math.max(0, pT - f.p); } }
+    const si = sleepInfo(state, addDays(date, -1));
+    return { kT, pT, left: { kcal: Math.max(0, kT - ft.kcal), p: Math.max(0, pT - ft.p) }, extraP: n ? Math.min(30, Math.round((def / n) * 0.5)) : 0, sleepMin: si.mean != null && si.mean < 7 ? Math.round(((7.5 - si.mean) * 60) / 2) : 0 };
+  }
+
+  // ---------- Разбор недели ----------
+  function weeklyReview(state, date) {
+    const days = []; for (let i = 6; i >= 0; i--) days.push(computeDay(state, addDays(date, -i)));
+    let prev = 0; for (let i = 13; i >= 7; i--) prev += computeDay(state, addDays(date, -i)).tokens;
+    const total = sum(days.map((r) => r.tokens)), ideal = days[0].Gmax * 7;
+    const lost = { train: 0, protein: 0, energy: 0, sleep: 0, recovery: 0 };
+    days.forEach((r) => r.limiters.forEach((l) => { lost[l.key] += l.gain; }));
+    const logs = []; for (let i = 0; i < 7; i++) logs.push(state.logs[addDays(date, -i)] || {});
+    const sess = logs.filter((l) => l.ex && Object.values(l.ex).some((e) => (e.sets || []).some((r) => r > 0))).length;
+    const sl = logs.map((l) => l.sleep).filter((h) => h > 0), fd = []; for (let i = 0; i < 7; i++) { const f = foodTotals(state, addDays(date, -i)); if (f.n) fd.push(f); }
+    const avgSleep = sl.length ? sum(sl) / sl.length : null, avgKcal = fd.length ? sum(fd.map((f) => f.kcal)) / fd.length : null, avgP = fd.length ? sum(fd.map((f) => f.p)) / fd.length : null;
+    const pr = state.profile, pT = Math.round(pr.proteinPerKg * pr.weight), kT = Math.round(pr.tdee * 1.08);
+    const text = {
+      train: 'Тренировки: выполнено ' + sess + ' из 3, объём ниже плана',
+      protein: 'Белок: в среднем ' + (avgP != null ? Math.round(avgP) : '—') + ' г при цели ' + pT + ' г',
+      energy: 'Калории: в среднем ' + (avgKcal != null ? Math.round(avgKcal) : '—') + ' при цели ' + kT,
+      sleep: 'Сон: в среднем ' + (avgSleep != null ? avgSleep.toFixed(1).replace('.', ',') : '—') + ' ч, цель от 7,5',
+      recovery: 'Тренировки шли слишком плотно, мышцы не успевали восстановиться',
+    };
+    const items = Object.keys(lost).filter((k) => lost[k] > 0.3).sort((a, b) => lost[b] - lost[a]).map((k) => ({ key: k, g: lost[k], text: text[k] }));
+    return { total, prev, ideal, items, sess, avgSleep, avgKcal, avgP, logged: logs.filter((l) => l.ex || (l.food && l.food.length) || l.sleep > 0).length };
+  }
+
+  // ---------- Связь сна с силовыми показателями ----------
+  function sleepVsPerformance(state) {
+    const by = {};
+    for (const d of Object.keys(state.logs).sort()) {
+      const l = state.logs[d]; if (!l.ex || !(l.sleep > 0)) continue;
+      for (const id in l.ex) { const t = sum((l.ex[id].sets || []).filter((r) => r > 0)); if (t > 0) (by[id] = by[id] || []).push({ t, sl: l.sleep }); }
+    }
+    const pts = [];
+    for (const id in by) { if (by[id].length < 3) continue; const m = sum(by[id].map((x) => x.t)) / by[id].length; by[id].forEach((x) => pts.push({ sl: x.sl, rel: x.t / m - 1 })); }
+    if (pts.length < 12) return { n: pts.length, enough: false };
+    const mx = sum(pts.map((p) => p.sl)) / pts.length, my = sum(pts.map((p) => p.rel)) / pts.length;
+    const sxy = sum(pts.map((p) => (p.sl - mx) * (p.rel - my))), sxx = sum(pts.map((p) => (p.sl - mx) ** 2)), syy = sum(pts.map((p) => (p.rel - my) ** 2));
+    const r = sxx && syy ? sxy / Math.sqrt(sxx * syy) : 0;
+    const lo = pts.filter((p) => p.sl < 7), hi = pts.filter((p) => p.sl >= 7);
+    return { n: pts.length, enough: true, r, lowN: lo.length, highN: hi.length, lowPct: lo.length >= 4 ? (sum(lo.map((p) => p.rel)) / lo.length) * 100 : null, highPct: hi.length >= 4 ? (sum(hi.map((p) => p.rel)) / hi.length) * 100 : null };
+  }
+
+  // ---------- Штрихкоды ----------
+  // Проверка контрольной цифры GS1 (EAN-8, UPC-A, EAN-13, GTIN-14): ловит опечатки до запроса
+  function validBarcode(code) {
+    if (!/^\d+$/.test(code) || ![8, 12, 13, 14].includes(code.length)) return false;
+    const d = code.split('').map(Number), chk = d.pop();
+    let s = 0; for (let i = d.length - 1, w = 3; i >= 0; i--, w = w === 3 ? 1 : 3) s += d[i] * w;
+    return (10 - (s % 10)) % 10 === chk;
+  }
+  // Ответ Open Food Facts → продукт на 100 г
+  function parseOFF(j) {
+    if (!j || j.status !== 1 || !j.product) return { error: 'notfound' };
+    const n = j.product.nutriments || {};
+    let kcal = Number(n['energy-kcal_100g']);
+    if (!(kcal >= 0) || n['energy-kcal_100g'] == null || n['energy-kcal_100g'] === '') { const kj = Number(n['energy_100g']); kcal = n['energy_100g'] != null && kj >= 0 ? kj / 4.184 : NaN; }
+    if (!(kcal >= 0)) return { error: 'nonutri' };
+    const name = [j.product.product_name, j.product.brands].filter(Boolean).join(' · ').slice(0, 60) || 'Продукт ' + (j.code || '');
+    const num = (v) => (Number(v) >= 0 ? Number(v) : 0);
+    return { name, kcal, p: num(n.proteins_100g), c: num(n.carbohydrates_100g), f: num(n.fat_100g) };
+  }
+
+  return { validBarcode, parseOFF, deloadOn, setsFor, deloadSuggested, restIdeal, painAdvice, catchup, weeklyReview, sleepVsPerformance, WARMUP, COOLDOWN, MOBILITY, PAIN, defaultMeals, slopeOf, weightTrend, estimateTDEE, navyBF, calibration, exerciseProgress, restFactor, workoutOf, projectWeek, windowSets, dayRaw, GROUPS, EXERCISES, PLAN, PLAN_SETS, TPLAN, defaultState, computeDay, weeklyTokens, declining, lastSets, exerciseSessions, groupSets, foodTotals, energyScore, sleepOne, sleepInfo, quality, gmax, weightOn, dstr, parse, addDays, weekday };
 });

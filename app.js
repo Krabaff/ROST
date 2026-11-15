@@ -19,7 +19,7 @@
     const def = C.defaultState();
     if (!st) { def.meas = []; def.meta = {}; return def; }
     st.profile = Object.assign({}, def.profile, st.profile);
-    st.logs = st.logs || {}; st.foods = st.foods || def.foods; st.schedule = st.schedule || def.schedule; st.meas = st.meas || []; st.plan = st.plan || {}; st.meta = st.meta || {};
+    st.logs = st.logs || {}; st.foods = st.foods || def.foods; st.schedule = st.schedule || def.schedule; st.meas = st.meas || []; st.plan = st.plan || {}; st.meta = st.meta || {}; st.meals = st.meals || def.meals; st.barcodes = st.barcodes || {}; if (st.deload === undefined) st.deload = null;
     return st;
   }
   let S = load();
@@ -34,6 +34,7 @@
   const scrollY = {};
   let sheet = null;
   let enter = true, popKey = null, sheetNew = false;
+  const ui = {};
   const prev = {}; // {type:'food'|'custom', food, qty}
 
   const log = () => (S.logs[date] = S.logs[date] || {});
@@ -43,6 +44,55 @@
   // ---------- Мелкие компоненты ----------
   const bar = (v, cls) => '<div class="bar"><i class="' + (cls || '') + '" style="width:' + Math.max(0, Math.min(100, v * 100)) + '%"></i></div>';
   const stepper = (a, id, val, extra) => '<div class="step"><button data-a="' + a + '" data-id="' + id + '" data-d="-1" ' + (extra || '') + '>−</button><b>' + val + '</b><button data-a="' + a + '" data-id="' + id + '" data-d="1" ' + (extra || '') + '>+</button></div>';
+
+  // ---------- Общие карточки ----------
+  function painCard() {
+    const pa = C.painAdvice(S, date); if (!pa) return '';
+    return '<div class="card warn"><h3>Боль: ' + pa.tags.join(', ') + '</h3><p>Сократите объём на 30–50% или замените упражнения, нагружающие это место: ' + pa.ex.slice(0, 5).map(esc).join(', ') + '. Если боль острая или держится больше недели, покажитесь врачу.</p></div>';
+  }
+  function listCard(title, sub, items, flag, key) {
+    const done = !!log()[flag], open = !!ui[key];
+    return '<div class="card"><button class="exh fold" data-a="fold" data-id="' + key + '"><b>' + title + '</b><span class="mut">' + (done ? '✓ выполнено' : sub) + (open ? ' ▴' : ' ▾') + '</span></button>' +
+      (open ? '<div class="lst">' + items.map(([n, d]) => '<div class="li"><b>' + esc(n) + '</b><span>' + esc(d) + '</span></div>').join('') + '<button class="btn ' + (done ? '' : 'pri') + '" data-a="flag" data-id="' + flag + '">' + (done ? 'Снять отметку' : 'Выполнено') + '</button></div>' : '') + '</div>';
+  }
+  function wellCard() {
+    const L = log(), pain = L.pain || [];
+    return '<div class="card"><h3>Самочувствие</h3><div class="chips wrap">' + Object.entries(C.PAIN).map(([k, n]) => '<button class="chip s ' + (pain.includes(k) ? 'on' : '') + '" data-a="pain" data-id="' + k + '">' + n + ' болит</button>').join('') + '</div><textarea id="note" class="io" style="height:72px" placeholder="Заметка к дню: самочувствие, погода, что менялось…">' + esc(L.note || '') + '</textarea></div>';
+  }
+  function reviewCard() {
+    const W = C.weeklyReview(S, TODAY), diff = W.total - W.prev, kT = Math.round(S.profile.tdee * 1.08);
+    const adv = { train: 'выполните все три тренировки целиком', protein: 'добавляйте белок в каждый приём пищи: творог, курица, яйца, протеин', energy: 'подвиньте калории ближе к ' + kT + ' ккал', sleep: 'ложитесь на 30–45 минут раньше', recovery: 'разнесите тренировки минимум на 48 часов' };
+    let h = '<div class="card"><h3>Разбор недели</h3><div class="row"><span>Токены за 7 дней</span><b>' + r1(W.total) + ' из ' + r0(W.ideal) + ' г</b></div>' + bar(W.ideal ? W.total / W.ideal : 0) + '<div class="row"><span>К прошлой неделе</span><b class="' + (diff >= 0 ? 'plus' : 'minus') + '">' + (diff >= 0 ? '+' : '−') + r1(Math.abs(diff)) + ' г</b></div>';
+    if (W.logged < 4) h += '<p class="mut small">Внесено только ' + W.logged + ' дн. из 7, разбор приблизительный.</p>';
+    if (W.items.length) h += '<h3 style="margin-top:14px">Где потеряно</h3>' + W.items.slice(0, 3).map((x) => '<div class="row lim"><span>' + esc(x.text) + '</span><b class="minus">−' + r1(x.g) + ' г</b></div>').join('') + '<p><b>На следующую неделю:</b> ' + adv[W.items[0].key] + '.</p><p class="mut small">Потери по каждому пункту оцениваются отдельно, поэтому их сумма не равна общему недобору.</p>';
+    else h += '<p class="mut">Явных потерь нет.</p>';
+    return h + '</div>';
+  }
+  function heatCard() {
+    const dd = C.parse(TODAY), mon = C.addDays(TODAY, -((dd.getDay() + 6) % 7)), start = C.addDays(mon, -77);
+    let cells = '', sums = [0, 0, 0, 0, 0, 0, 0], cnt = [0, 0, 0, 0, 0, 0, 0], any = 0;
+    for (let w = 0; w < 12; w++) for (let d = 0; d < 7; d++) {
+      const ds = C.addDays(start, w * 7 + d); if (ds > TODAY) continue;
+      const l = S.logs[ds], has = l && (l.ex || (l.food && l.food.length) || l.sleep > 0);
+      let fill = '#1e2127';
+      if (has) { const o = C.computeDay(S, ds).opt; fill = o >= 85 ? '#7ee0a1' : o >= 60 ? '#f0b86e' : '#ef7a7a'; sums[d] += o; cnt[d]++; any++; }
+      cells += '<rect x="' + (24 + w * 25) + '" y="' + (d * 25) + '" width="22" height="22" rx="5" fill="' + fill + '"/>';
+    }
+    const names = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
+    const labels = names.map((n, i) => '<text x="0" y="' + (i * 25 + 16) + '" class="hl">' + n + '</text>').join('');
+    let weak = '';
+    const av = names.map((n, i) => ({ n, v: cnt[i] >= 3 ? sums[i] / cnt[i] : null })).filter((x) => x.v != null).sort((x, y) => x.v - y.v);
+    if (av.length >= 4) weak = '<div class="row"><span>Слабее всего</span><b>' + av[0].n + ' · ' + r0(av[0].v) + '%</b></div><div class="row"><span>Сильнее всего</span><b>' + av[av.length - 1].n + ' · ' + r0(av[av.length - 1].v) + '%</b></div>';
+    return '<div class="card"><h3>Оптимальность по дням, 12 недель</h3>' + (any ? '<svg viewBox="0 0 324 175" class="chart">' + labels + cells + '</svg><p class="mut small">Зелёный от 85%, жёлтый 60–85%, красный ниже. Серый — нет данных. Строки — дни недели, столбцы — недели (справа новые).</p>' + weak : '<p class="mut">Появится, когда накопятся данные.</p>') + '</div>';
+  }
+  function sleepCard() {
+    const r = C.sleepVsPerformance(S);
+    let h = '<div class="card"><h3>Сон и силовые показатели</h3>';
+    if (!r.enough) return h + '<p class="mut">Нужно больше тренировок со внесённым сном: сейчас ' + r.n + ' из 12 измерений.</p></div>';
+    h += '<div class="row"><span>Связь (корреляция)</span><b>' + r1(r.r) + '</b></div>';
+    if (r.lowPct != null && r.highPct != null) h += '<div class="row"><span>После сна меньше 7 ч</span><b>' + (r.lowPct >= 0 ? '+' : '−') + r1(Math.abs(r.lowPct)) + '%</b></div><div class="row"><span>После сна от 7 ч</span><b>' + (r.highPct >= 0 ? '+' : '−') + r1(Math.abs(r.highPct)) + '%</b></div>';
+    return h + '<p class="mut small">' + (Math.abs(r.r) < 0.2 ? 'На ваших данных связь слабая или не видна. ' : r.r > 0 ? 'Чем дольше сон, тем больше повторов в тот же день. ' : 'Обратная связь: скорее всего, влияют другие факторы. ') + 'Проценты — отклонение суммы повторов от вашей обычной для упражнения. Измерений: ' + r.n + '.</p></div>';
+  }
 
   // ---------- Экран: Сегодня ----------
   function viewToday() {
@@ -55,7 +105,7 @@
     let planned = 0, done = 0;
     if (wo && C.PLAN[wo]) {
       const L = log().ex || {};
-      for (const id of C.PLAN[wo].ex) { planned += C.EXERCISES[id].sets; done += ((L[id] && L[id].sets) || []).filter((x) => x > 0).length; }
+      for (const id of C.PLAN[wo].ex) { planned += C.setsFor(S, date, id); done += ((L[id] && L[id].sets) || []).filter((x) => x > 0).length; }
     }
     let h = '<div class="datenav"><button data-a="day" data-d="-1">‹</button><div><b>' + (date === TODAY ? 'Сегодня' : fmtDate(date)) + '</b><span>' + fmtDate(date) + '</span></div><button data-a="day" data-d="1" ' + (date >= TODAY ? 'disabled' : '') + '>›</button></div>';
     h += '<div class="ringwrap"><svg viewBox="0 0 180 180" class="ring"><circle cx="90" cy="90" r="' + R_ + '" class="rbg"/><circle cx="90" cy="90" r="' + R_ + '" class="rfg ' + col + '" stroke-dasharray="' + circ + '" stroke-dashoffset="' + (circ * (1 - pct / 100)) + '" transform="rotate(-90 90 90)"/></svg><div class="ringtxt"><div class="big">' + r0(R.opt) + '<small>%</small></div><div class="tok">' + (R.tokens >= 0 ? '+' : '−') + r1(Math.abs(R.tokens)) + ' г</div></div></div>';
@@ -68,10 +118,14 @@
       '<div class="row"><span>Сон <small>' + (R.sleep.last ? r1(R.sleep.last) + ' ч ночью · ' : '') + (R.sleep.mean ? 'среднее ' + r1(R.sleep.mean) + ' ч за неделю' : 'не внесён') + '</small></span><b>' + r0(R.S * 100) + '%</b></div>' + bar(R.S) +
       (R.R < 0.98 ? '<div class="row"><span>Восстановление <small>тренировки идут слишком плотно</small></span><b>' + r0(R.R * 100) + '%</b></div>' + bar(R.R) : '') + '</div>';
     if (wo && C.PLAN[wo]) h += '<button class="card link" data-a="tab" data-id="train"><div class="row"><span>' + esc(C.PLAN[wo].name) + '</span><b>' + done + ' / ' + planned + '</b></div>' + bar(planned ? done / planned : 0) + '</button>';
-    else h += '<div class="card"><div class="row"><span>День отдыха</span><b>восстановление</b></div></div>';
+    else h += '<button class="card link" data-a="tab" data-id="train"><div class="row"><span>День отдыха<small>Мобильность плеч · 8 минут</small></span><b>' + (log().mob ? '✓' : 'восстановление') + '</b></div></button>';
+    h += painCard();
+    if (date === TODAY) { const cu = C.catchup(S, date); h += '<div class="card"><h3>На сегодня осталось</h3><div class="row"><span>Калории</span><b>' + r0(cu.left.kcal) + ' ккал</b></div><div class="row"><span>Белок</span><b>' + r0(cu.left.p) + (cu.extraP ? ' + ' + cu.extraP : '') + ' г</b></div>' + (cu.extraP ? '<p class="mut small">+' + cu.extraP + ' г — наверстать недобор белка за последние дни.</p>' : '') + (cu.sleepMin ? '<div class="row"><span>Сон</span><b>лечь на ' + cu.sleepMin + ' мин раньше</b></div>' : '') + '</div>'; }
+    if (S.deload && S.deload.to >= TODAY) h += '<div class="note">Разгрузочная неделя до ' + fmtDate(S.deload.to) + ': подходов вдвое меньше.</div>';
     if (R.limiters.length) h += '<div class="card"><h3>Что добавит больше всего</h3>' + R.limiters.slice(0, 3).map((l) => '<div class="row lim"><span>' + esc(l.text) + '</span><b class="plus">+' + r1(l.gain) + ' г</b></div>').join('') + '</div>';
     else h += '<div class="card"><h3>Всё в оптимуме</h3><p class="mut">Ограничителей нет — так держать.</p></div>';
     if (R.risks.length) h += '<div class="card warn"><h3>Внимание</h3>' + R.risks.map((x) => '<p>' + esc(x) + '</p>').join('') + (R.pen > 0 ? '<p class="mut">Штраф к токенам: −' + r1(R.pen) + ' г</p>' : '') + '</div>';
+    { const WR = C.weeklyReview(S, date); h += '<button class="card link" data-a="tab" data-id="progress"><div class="row"><span>Разбор недели<small>' + (WR.items[0] ? 'главное: ' + esc(WR.items[0].text) : 'явных потерь нет') + '</small></span><b>' + r1(WR.total) + ' г</b></div></button>'; }
     h += '<div class="card"><div class="row"><span>Токены за 7 дней</span><b>' + r1(wk) + ' г</b></div><p class="mut">Это потенциал, а не измеренный прирост. Сверяйте с замерами на вкладке «Прогресс».</p></div>';
     return h;
   }
@@ -81,17 +135,19 @@
     const wo = workoutOf(date);
     let h = '<div class="datenav"><button data-a="day" data-d="-1">‹</button><div><b>' + (date === TODAY ? 'Сегодня' : fmtDate(date)) + '</b><span>' + fmtDate(date) + '</span></div><button data-a="day" data-d="1" ' + (date >= TODAY ? 'disabled' : '') + '>›</button></div>';
     h += '<div class="chips">' + ['A', 'B', 'C', ''].map((k) => '<button class="chip ' + (wo === k ? 'on' : '') + '" data-a="wo" data-id="' + k + '">' + (k ? 'Верх ' + k : 'Отдых') + '</button>').join('') + '</div>';
-    if (!wo || !C.PLAN[wo]) return h + '<div class="card"><p class="mut">Сегодня отдых. Восстановление — часть роста: сон и белок продолжают работать.</p></div>';
-    h += '<h2>' + esc(C.PLAN[wo].name) + '</h2>';
+    if (!wo || !C.PLAN[wo]) return h + painCard() + '<div class="card"><p class="mut">Сегодня отдых. Восстановление — часть роста: сон и белок продолжают работать.</p></div>' + listCard('Мобильность плеч', '8 минут', C.MOBILITY, 'mob', 'mob') + wellCard();
+    h += '<h2>' + esc(C.PLAN[wo].name) + '</h2>' + painCard();
+    if (C.deloadOn(S, date)) h += '<div class="note">Разгрузочная неделя: подходов вдвое меньше, усилие то же.</div>';
+    h += listCard('Разминка', '5 минут', C.WARMUP, 'warm', 'warm');
     const L = log().ex || {};
     for (const id of C.PLAN[wo].ex) {
-      const ex = C.EXERCISES[id];
+      const ex = C.EXERCISES[id], ns = C.setsFor(S, date, id);
       const e = L[id] || { rir: 2, sets: [] };
       const last = C.lastSets(S, id, date);
-      const ready = last && last.sets.length >= ex.sets && last.sets.every((x) => x >= ex.reps[1]);
+      const ready = last && last.sets.length >= ns && last.sets.every((x) => x >= ex.reps[1]);
       const doneN = (e.sets || []).filter((x) => x > 0).length;
-      h += '<div class="card ex ' + (doneN === ex.sets ? 'full' : '') + '"><div class="exh"><b>' + esc(ex.name) + '</b><button class="allb ' + (doneN === ex.sets ? 'on' : '') + '" data-a="all" data-id="' + id + '">' + (doneN === ex.sets ? '✓ Готово' : 'Отметить все') + '</button></div><p class="mut"><span class="tgt">' + ex.sets + '×' + ex.reps[0] + '–' + ex.reps[1] + '</span> · ' + esc(ex.tip) + (last ? ' · прошлый раз: ' + last.sets.join(', ') : '') + '</p>' + (ready ? '<p class="small plus">Все подходы были на верхней границе — пора усложнить: пауза внизу, резинка слабее или дополнительный вес.</p>' : '');
-      for (let i = 0; i < ex.sets; i++) {
+      h += '<div class="card ex ' + (doneN === ns ? 'full' : '') + '"><div class="exh"><b>' + esc(ex.name) + '</b><button class="allb ' + (doneN === ns ? 'on' : '') + '" data-a="all" data-id="' + id + '">' + (doneN === ns ? '✓ Готово' : 'Отметить все') + '</button></div><p class="mut"><span class="tgt">' + ns + '×' + ex.reps[0] + '–' + ex.reps[1] + '</span> · ' + esc(ex.tip) + (last ? ' · прошлый раз: ' + last.sets.join(', ') : '') + '</p>' + (ready ? '<p class="small plus">Все подходы были на верхней границе — пора усложнить: ' + (ex.prog[C.exerciseSessions(S, id, date).length % 3] + ' или ' + ex.prog[(C.exerciseSessions(S, id, date).length + 1) % 3]).toLowerCase() + '.</p>' : '');
+      for (let i = 0; i < ns; i++) {
         const v = (e.sets && e.sets[i]) || 0;
         const sug = v || (last && last.sets[i]) || ex.reps[0];
         h += '<div class="set"><button class="chk ' + (v > 0 ? 'on' : '') + '" data-a="set" data-id="' + id + '" data-i="' + i + '" aria-label="Подход ' + (i + 1) + '">' + (v > 0 ? '✓' : i + 1) + '</button><span class="sl">Подход ' + (i + 1) + '</span>' +
@@ -102,6 +158,7 @@
       const restRow = '<div class="rir n"><span>Отдых, мин</span>' + [[45, '≤1'], [75, '1–1,5'], [105, '1,5–2'], [150, '2–3'], [210, '3+']].map(([v, t]) => '<button class="chip s ' + (rs === v ? 'on' : '') + '" data-a="rest" data-id="' + id + '" data-v="' + v + '">' + t + '</button>').join('') + (rs && rf < 0.995 ? '<span class="small minus">зачёт −' + r0((1 - rf) * 100) + '%</span>' : '') + '</div>';
       h += '<div class="rir"><span>Запас повторов</span>' + [[1, '0–1'], [2, '2'], [3, '3'], [4, '4–5'], [6, '6+']].map(([v, t]) => '<button class="chip s ' + (rir === v ? 'on' : '') + '" data-a="rir" data-id="' + id + '" data-v="' + v + '">' + t + '</button>').join('') + '</div>' + restRow + '</div>';
     }
+    h += listCard('Заминка', '3 минуты', C.COOLDOWN, 'cool', 'cool') + wellCard();
     h += '<p class="mut small">Запас повторов — сколько ещё повторов вы могли бы сделать. Подходы с запасом 0–3 считаются полностью, 4–5 — вполовину, 6+ — не считаются: они слишком далеки от отказа для роста. Отдых: для подтягиваний и брусьев лучше 2–3 минуты, для упражнений с резинкой хватает минуты; при меньшем отдыхе подходы засчитываются с небольшой скидкой.</p>';
     return h;
   }
@@ -115,6 +172,8 @@
     const sess = P.days.filter((x) => x.wo && C.PLAN[x.wo]).length;
     const A = P.assumed;
     let h = '<h2>План недели</h2><div class="card"><h3>Прогноз на 7 дней</h3><div class="row"><span>Токены</span><b>' + r1(tot) + ' г</b></div><div class="row"><span>К базовому плану (пн · ср · пт)</span><b class="' + (diff >= -0.05 ? 'plus' : 'minus') + '">' + (diff >= 0 ? '+' : '−') + r1(Math.abs(diff)) + ' г</b></div><div class="row"><span>Тренировок в неделю</span><b>' + sess + '</b></div></div>';
+    if (S.deload && S.deload.to >= TODAY) h += '<div class="card"><h3>Разгрузочная неделя</h3><p>Идёт до ' + fmtDate(S.deload.to) + ': те же тренировки, но подходов вдвое меньше. В модели такая неделя засчитывается примерно на 80%, а мышцы и суставы отдыхают.</p><button class="btn" data-a="enddeload">Отменить разгрузку</button></div>';
+    else if (C.deloadSuggested(S, TODAY)) h += '<div class="card warn"><h3>Нужна разгрузка?</h3><p>Повторы падают в нескольких упражнениях подряд. Это частый признак накопленной усталости. Рекомендуем неделю с половиной подходов.</p><button class="btn pri" data-a="startdeload">Начать разгрузочную неделю</button></div>';
     h += '<div class="card"><h3>Выберите тип дня</h3>' + P.days.map((x) => {
       const dt = C.parse(x.date), tk = x.r.tokens;
       return '<div class="prow"><div class="pd"><b>' + (x.date === TODAY ? 'Сегодня' : DAYS[dt.getDay()]) + '</b><span>' + dt.getDate() + ' ' + MONTHS[dt.getMonth()] + '</span></div><div class="seg">' + ['A', 'B', 'C', ''].map((k) => '<button class="chip s ' + (x.wo === k ? 'on' : '') + '" data-a="plan" data-id="' + x.date + '" data-v="' + k + '">' + (k || 'Отдых') + '</button>').join('') + '</div><div class="pt ' + (tk >= 0 ? 'plus' : 'minus') + '">' + (tk >= 0 ? '+' : '−') + r1(Math.abs(tk)) + '</div>' + (x.wo && C.PLAN[x.wo] && x.r.R < 0.95 ? '<div class="pw">Мало отдыха между тренировками: −' + r0((1 - x.r.R) * 100) + '% к зачёту</div>' : '') + '</div>';
@@ -141,8 +200,10 @@
       '<div class="row"><span>Углеводы</span><b>' + r0(ft.c) + ' г</b></div><div class="row"><span>Жиры</span><b>' + r0(ft.f) + ' г</b></div></div>';
     const items = L.food || [];
     if (items.length) h += '<div class="card"><h3>Съедено</h3>' + items.map((it, i) => '<div class="row item"><span>' + esc(it.name) + '<small>' + r0(it.kcal) + ' ккал · Б ' + r0(it.p) + ' · У ' + r0(it.c) + ' · Ж ' + r0(it.f) + '</small></span><button class="x" data-a="delfood" data-i="' + i + '" aria-label="Удалить">×</button></div>').join('') + '</div>';
+    if (items.length) h += '<button class="btn ghost" data-a="savetplopen">Сохранить съеденное как шаблон</button>';
     const yf = (S.logs[C.addDays(date, -1)] || {}).food;
     if (!items.length && yf && yf.length) h += '<button class="btn" data-a="copyfood">Скопировать питание со вчера (' + r0(yf.reduce((s, x) => s + x.kcal, 0)) + ' ккал)</button>';
+    h += '<h3 class="sec">Шаблоны</h3><div class="chips wrap">' + S.meals.map((m, i) => '<button class="chip" data-a="pickmeal" data-i="' + i + '">' + esc(m.name) + '</button>').join('') + '<button class="chip plusb" data-a="bcopen">Штрихкод</button><button class="chip plusb" data-a="quickopen">Быстрый ввод</button></div>';
     h += '<h3 class="sec">Добавить</h3><div class="chips wrap">' + S.foods.map((f, i) => '<button class="chip" data-a="pick" data-i="' + i + '">' + esc(f.name) + '</button>').join('') + '<button class="chip plusb" data-a="custom">+ своё</button></div>';
     return h;
   }
@@ -158,7 +219,7 @@
     vals.forEach((v, i) => { const hgt = Math.max(1, (Math.max(0, v) / max) * 90); svg += '<rect x="' + (i * bw + 2) + '" y="' + (95 - hgt) + '" width="' + (bw - 4) + '" height="' + hgt + '" rx="3" class="' + (days[i] === TODAY ? 'cur' : '') + '"/>'; });
     svg += '<line x1="0" x2="300" y1="95.5" y2="95.5" class="axis"/></svg>';
     const sum14 = vals.reduce((a, b) => a + b, 0);
-    let h = '<h2>Прогресс</h2><div class="card"><h3>Токены за 14 дней</h3>' + svg + '<div class="row"><span>Сумма</span><b>' + r1(sum14) + ' г</b></div><div class="row"><span>В среднем в день</span><b>' + r1(sum14 / 14) + ' г</b></div></div>';
+    let h = '<h2>Прогресс</h2>' + reviewCard() + '<div class="card"><h3>Токены за 14 дней</h3>' + svg + '<div class="row"><span>Сумма</span><b>' + r1(sum14) + ' г</b></div><div class="row"><span>В среднем в день</span><b>' + r1(sum14 / 14) + ' г</b></div></div>' + heatCard() + sleepCard();
     const ws = []; for (const d of Object.keys(S.logs).sort()) if (S.logs[d].weight > 0) ws.push([d, S.logs[d].weight]);
     if (ws.length >= 2) {
       const l = ws.slice(-30), mn = Math.min(...l.map((x) => x[1])) - 0.3, mx = Math.max(...l.map((x) => x[1])) + 0.3;
@@ -203,6 +264,23 @@
   // ---------- Шторка добавления еды ----------
   function sheetHtml() {
     if (!sheet) return '';
+    const shade = '<div class="shade" data-a="close"></div>';
+    if (sheet.type === 'barcode') {
+      let b = '<div class="sheet"><h3>Штрихкод</h3>';
+      if (sheet.status === 'found') {
+        const it = sheet.item;
+        b += '<p><b>' + esc(it.name) + '</b></p><p class="mut">на 100 г: ' + r0(it.kcal) + ' ккал · Б ' + r1(it.p) + ' · У ' + r1(it.c) + ' · Ж ' + r1(it.f) + '</p><div class="chips">' + [50, 100, 150, 200, 250].map((v) => '<button class="chip s ' + (sheet.grams === v ? 'on' : '') + '" data-a="bcg" data-v="' + v + '">' + v + ' г</button>').join('') + '</div><div class="mform one"><label>Сколько съели, г<input id="b_g" inputmode="decimal" value="' + sheet.grams + '"></label></div><label class="chkl"><input type="checkbox" id="b_save" checked> Сохранить в мой список</label><button class="btn pri" data-a="bcadd">Добавить</button><button class="btn ghost" data-a="bcreset">Другой штрихкод</button>';
+      } else {
+        b += '<p class="mut">Цифры под полосками на упаковке (обычно 13). Нужен интернет; найденные продукты запоминаются.</p><div class="mform one"><label>Номер<input id="b_code" inputmode="numeric" autocomplete="off" value="' + esc(sheet.code) + '" placeholder="4607025392001"></label></div>' + (sheet.msg ? '<p class="minus">' + esc(sheet.msg) + '</p>' : '') + '<button class="btn pri" data-a="bcfind" ' + (sheet.status === 'loading' ? 'disabled' : '') + '>' + (sheet.status === 'loading' ? 'Ищу…' : 'Найти') + '</button>';
+      }
+      return shade + b + '</div>';
+    }
+    if (sheet.type === 'meal') {
+      const mm = S.meals[sheet.i], tk = mm.items.reduce((s, x) => s + x.kcal, 0), tp = mm.items.reduce((s, x) => s + x.p, 0);
+      return shade + '<div class="sheet"><h3>' + esc(mm.name) + '</h3>' + mm.items.map((x) => '<div class="row"><span>' + esc(x.name) + '</span><b>' + r0(x.kcal) + ' ккал</b></div>').join('') + '<p class="mut">Итого: ' + r0(tk) + ' ккал · белок ' + r0(tp) + ' г</p><button class="btn pri" data-a="addmeal">Добавить всё</button><button class="btn ghost" data-a="delmeal">Удалить шаблон</button></div>';
+    }
+    if (sheet.type === 'savetpl') return shade + '<div class="sheet"><h3>Новый шаблон</h3><div class="mform one"><label>Название<input id="t_name" placeholder="Например, ужин после тренировки"></label></div><button class="btn pri" data-a="savetpl">Сохранить</button></div>';
+    if (sheet.type === 'quick') return shade + '<div class="sheet"><h3>Быстрый ввод</h3><p class="mut">Итог за приём или за день. Можно выбрать процент от цели (' + sheet.kT + ' ккал, ' + sheet.pT + ' г белка).</p><div class="chips">' + [70, 85, 100, 110].map((v) => '<button class="chip s" data-a="quickpct" data-v="' + v + '">' + v + '%</button>').join('') + '</div><div class="mform"><label>Калории<input id="q_kcal" inputmode="decimal" value="' + sheet.kcal + '"></label><label>Белок, г<input id="q_p" inputmode="decimal" value="' + sheet.p + '"></label></div><button class="btn pri" data-a="addquick">Добавить</button></div>';
     if (sheet.type === 'food') {
       const f = S.foods[sheet.i], q = sheet.qty;
       return '<div class="shade" data-a="close"></div><div class="sheet"><h3>' + esc(f.name) + '</h3><p class="mut">на ' + esc(f.unit) + ': ' + f.kcal + ' ккал · Б ' + f.p + ' · У ' + f.c + ' · Ж ' + f.f + '</p><div class="row"><span>Количество порций</span>' + stepper('qty', 'x', q) + '</div><p class="mut">Итого: ' + r0(f.kcal * q) + ' ккал · Б ' + r0(f.p * q) + ' г</p><button class="btn pri" data-a="addfood">Добавить</button><button class="btn ghost" data-a="delpreset">Удалить из списка</button></div>';
@@ -246,9 +324,42 @@
 
   const num = (id) => { const el = $(id); if (!el) return NaN; const v = parseFloat(String(el.value).replace(',', '.')); return v; };
 
-  function ensureEx(id) { const L = log(); L.ex = L.ex || {}; const ex = C.EXERCISES[id]; if (!L.ex[id]) L.ex[id] = { rir: 2, sets: Array(ex.sets).fill(0) }; while (L.ex[id].sets.length < ex.sets) L.ex[id].sets.push(0); return L.ex[id]; }
+  function ensureEx(id) { const L = log(); L.ex = L.ex || {}; const n = C.setsFor(S, date, id); if (!L.ex[id]) L.ex[id] = { rir: 2, sets: Array(n).fill(0) }; while (L.ex[id].sets.length < n) L.ex[id].sets.push(0); L.deload = C.deloadOn(S, date); return L.ex[id]; }
   function lock() { if (S.plan[date] === undefined) S.plan[date] = C.workoutOf(S, date); }
   function defReps(id, i) { const last = C.lastSets(S, id, date); return (last && last.sets[i]) || C.EXERCISES[id].reps[0]; }
+
+  // ---------- Поиск по штрихкоду (Open Food Facts) ----------
+  async function lookup(code) {
+    const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 8000);
+    try {
+      const r = await fetch('https://world.openfoodfacts.org/api/v2/product/' + code + '.json?fields=product_name,brands,nutriments', { signal: ctl.signal });
+      if (!r.ok && r.status !== 404) return { error: 'net' };
+      return C.parseOFF(await r.json());
+    } catch (e) { return { error: 'net' }; } finally { clearTimeout(to); }
+  }
+
+  // ---------- Таймер отдыха ----------
+  let timer = null, audio = null, beeped = false;
+  function startTimer(sec) {
+    timer = { end: Date.now() + sec * 1000 }; beeped = false;
+    try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); if (audio.state === 'suspended') audio.resume(); } catch (e) { /* звук недоступен */ }
+    drawTimer();
+  }
+  function beep() {
+    try { if (audio) [0, 0.28].forEach((t) => { const o = audio.createOscillator(), g = audio.createGain(); o.frequency.value = 880; g.gain.value = 0.15; o.connect(g); g.connect(audio.destination); o.start(audio.currentTime + t); o.stop(audio.currentTime + t + 0.18); }); } catch (e) { /* ничего */ }
+    try { if (navigator.vibrate) navigator.vibrate([150, 80, 150]); } catch (e) { /* ничего */ }
+  }
+  function drawTimer() {
+    let el = $('#timer');
+    if (!timer) { if (el) el.classList.remove('on'); return; }
+    if (!el) { el = document.createElement('div'); el.id = 'timer'; el.innerHTML = '<span id="tt"></span><button data-a="timeradd">+30 с</button><button data-a="timerstop" aria-label="Закрыть">×</button>'; document.body.appendChild(el); }
+    const left = Math.ceil((timer.end - Date.now()) / 1000);
+    if (left <= -45) { timer = null; el.classList.remove('on'); return; }
+    el.classList.add('on'); el.classList.toggle('done', left <= 0);
+    $('#tt').textContent = left > 0 ? 'Отдых ' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0') : 'Можно следующий подход';
+    if (left <= 0 && !beeped) { beeped = true; beep(); }
+  }
+  setInterval(drawTimer, 500);
 
   const actions = {
     tab(el) { scrollY[view] = window.scrollY; view = el.dataset.id; },
@@ -260,11 +371,50 @@
     applytdee(el) { S.profile.tdee = +el.dataset.v; toast('Расход обновлён'); },
     applylevel(el) { S.profile.level = +el.dataset.v; toast('Потенциал обновлён'); },
     delmeas() { S.meas.pop(); },
-    set(el) { const id = el.dataset.id, i = +el.dataset.i; const e = ensureEx(id); lock(); e.sets[i] = e.sets[i] > 0 ? 0 : defReps(id, i); if (e.sets[i] > 0) popKey = id + ':' + i; },
+    bcopen() { sheetNew = true; sheet = { type: 'barcode', code: '', status: 'idle', grams: 100, msg: '' }; },
+    bcreset() { sheet.status = 'idle'; sheet.item = null; sheet.code = ''; sheet.msg = ''; },
+    bcg(el) { sheet.grams = +el.dataset.v; },
+    bcfind() {
+      const code = (($('#b_code').value) || '').replace(/\D/g, '');
+      sheet.code = code;
+      if (!C.validBarcode(code)) { sheet.msg = code.length ? 'Номер не похож на штрихкод: проверьте цифры (контрольная цифра не сходится).' : 'Введите номер штрихкода.'; return; }
+      if (S.barcodes[code]) { sheet.item = S.barcodes[code]; sheet.status = 'found'; sheet.msg = ''; return; }
+      sheet.status = 'loading'; sheet.msg = '';
+      const my = sheet;
+      lookup(code).then((res) => {
+        if (sheet !== my) return;
+        if (res.error) { my.status = 'idle'; my.msg = { notfound: 'Продукта нет в базе Open Food Facts. Внесите его вручную через «+ своё».', nonutri: 'В базе нет данных о калориях этого продукта. Внесите вручную.', net: 'Нет связи с базой. Проверьте интернет и повторите.' }[res.error]; }
+        else { S.barcodes[code] = res; save(); my.item = res; my.status = 'found'; }
+        render();
+      });
+    },
+    bcadd() {
+      const g = num('#b_g'); if (!(g > 0)) return false;
+      const it = sheet.item, k = g / 100, L = log(); L.food = L.food || [];
+      L.food.push({ name: it.name + ' · ' + r0(g) + ' г', kcal: it.kcal * k, p: it.p * k, c: it.c * k, f: it.f * k });
+      if ($('#b_save').checked && !S.foods.some((x) => x.name === it.name)) S.foods.push({ name: it.name, unit: '100 г', kcal: it.kcal, p: it.p, c: it.c, f: it.f });
+      sheet = null; toast('Добавлено');
+    },
+    timerstop() { timer = null; drawTimer(); },
+    timeradd() { if (timer) { timer.end += 30000; beeped = false; } drawTimer(); },
+    fold(el) { ui[el.dataset.id] = !ui[el.dataset.id]; },
+    flag(el) { const L = log(); L[el.dataset.id] = !L[el.dataset.id]; },
+    pain(el) { const L = log(), k = el.dataset.id; L.pain = L.pain || []; L.pain = L.pain.includes(k) ? L.pain.filter((x) => x !== k) : L.pain.concat(k); },
+    startdeload() { S.deload = { from: TODAY, to: C.addDays(TODAY, 6) }; toast('Разгрузка началась'); },
+    enddeload() { S.deload = null; },
+    pickmeal(el) { sheetNew = true; sheet = { type: 'meal', i: +el.dataset.i }; },
+    addmeal() { const mm = S.meals[sheet.i], L = log(); L.food = L.food || []; mm.items.forEach((x) => L.food.push(Object.assign({}, x))); sheet = null; toast(mm.name + ' добавлен'); },
+    delmeal() { S.meals.splice(sheet.i, 1); sheet = null; },
+    savetplopen() { sheetNew = true; sheet = { type: 'savetpl' }; },
+    savetpl() { const nm = (($('#t_name').value) || '').trim() || 'Шаблон'; S.meals.push({ name: nm, items: (log().food || []).map((x) => Object.assign({}, x)) }); sheet = null; toast('Шаблон сохранён'); },
+    quickopen() { sheetNew = true; const cp = C.catchup(S, date); sheet = { type: 'quick', kcal: '', p: '', kT: cp.kT, pT: cp.pT }; },
+    quickpct(el) { const k = +el.dataset.v / 100; sheet.kcal = Math.round(sheet.kT * k); sheet.p = Math.round(sheet.pT * k); },
+    addquick() { const kcal = num('#q_kcal') || 0, p = num('#q_p') || 0; if (!(kcal > 0 || p > 0)) return; const L = log(); L.food = L.food || []; L.food.push({ name: 'Быстрый ввод', kcal, p, c: 0, f: 0 }); sheet = null; toast('Добавлено'); },
+    set(el) { const id = el.dataset.id, i = +el.dataset.i; const e = ensureEx(id); lock(); e.sets[i] = e.sets[i] > 0 ? 0 : defReps(id, i); if (e.sets[i] > 0) { popKey = id + ':' + i; startTimer(e.rest || C.restIdeal(id)); } },
     rep(el) { const id = el.dataset.id, i = +el.dataset.i, d = +el.dataset.d; const e = ensureEx(id); const cur = e.sets[i] > 0 ? e.sets[i] : defReps(id, i); e.sets[i] = Math.max(1, cur + d); lock(); },
     rir(el) { ensureEx(el.dataset.id).rir = +el.dataset.v; },
     rest(el) { const e = ensureEx(el.dataset.id), v = +el.dataset.v; e.rest = e.rest === v ? 0 : v; },
-    all(el) { const id = el.dataset.id, ex = C.EXERCISES[id], e = ensureEx(id); const full = e.sets.slice(0, ex.sets).every((x) => x > 0); for (let i = 0; i < ex.sets; i++) e.sets[i] = full ? 0 : (e.sets[i] > 0 ? e.sets[i] : defReps(id, i)); lock(); if (!full) popKey = 'all:' + id; },
+    all(el) { const id = el.dataset.id, n = C.setsFor(S, date, id), e = ensureEx(id); const full = e.sets.slice(0, n).every((x) => x > 0); for (let i = 0; i < n; i++) e.sets[i] = full ? 0 : (e.sets[i] > 0 ? e.sets[i] : defReps(id, i)); lock(); if (!full) popKey = 'all:' + id; },
     sleep(el) { const L = log(); const cur = L.sleep > 0 ? L.sleep : 7; const n = Math.round((cur + 0.25 * +el.dataset.d) * 4) / 4; L.sleep = Math.max(0, Math.min(14, L.sleep > 0 ? n : 7.5)); },
     weight(el) { const L = log(); const base = L.weight > 0 ? L.weight : (C.weightOn(S, date) || S.profile.weight); L.weight = Math.round((L.weight > 0 ? base + 0.1 * +el.dataset.d : base) * 10) / 10; },
     pick(el) { sheetNew = true; sheet = { type: 'food', i: +el.dataset.i, qty: 1 }; },
@@ -306,7 +456,9 @@
     if (r !== false) render();
     if (el.dataset.a === 'tab') window.scrollTo(0, scrollY[view] || 0);
   });
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && ev.target.id === 'b_code') { ev.preventDefault(); const b = document.querySelector('[data-a=bcfind]'); if (b) b.click(); } });
   document.addEventListener('change', (ev) => {
+    if (ev.target.id === 'note') { log().note = ev.target.value; save(); return; }
     const k = ev.target.dataset && ev.target.dataset.prof;
     if (!k) return;
     const v = parseFloat(String(ev.target.value).replace(',', '.'));
