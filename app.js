@@ -25,7 +25,13 @@
   let S = load();
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { /* не критично */ }
   let toastT = null;
-  function toast(msg) { let t = $('#toast'); if (!t) { t = document.createElement('div'); t.id = 'toast'; document.body.appendChild(t); } t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2000); }
+  let tmsg = null;
+  function toast(msg, undo) {
+    let t = $('#toast'); if (!t) { t = document.createElement('div'); t.id = 'toast'; document.body.appendChild(t); }
+    tmsg = msg; t.innerHTML = '<span></span>' + (undo ? '<button data-a="undo">Отменить</button>' : ''); t.firstChild.textContent = msg;
+    t.classList.toggle('u', !!undo); t.classList.remove('on'); void t.offsetWidth; t.classList.add('on');
+    clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), undo ? 4500 : 2000);
+  }
   function save() { mem = S; try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { /* хранилище недоступно */ } }
 
   let view = 'today';
@@ -159,7 +165,9 @@
       const restRow = '<div class="rir n"><span>Отдых, мин</span>' + [[45, '≤1'], [75, '1–1,5'], [105, '1,5–2'], [150, '2–3'], [210, '3+']].map(([v, t]) => '<button class="chip s ' + (rs === v ? 'on' : '') + '" data-a="rest" data-id="' + id + '" data-v="' + v + '">' + t + '</button>').join('') + (rs && rf < 0.995 ? '<span class="small minus">зачёт −' + r0((1 - rf) * 100) + '%</span>' : '') + '</div>';
       h += '<div class="rir"><span>Запас повторов</span>' + [[1, '0–1'], [2, '2'], [3, '3'], [4, '4–5'], [6, '6+']].map(([v, t]) => '<button class="chip s ' + (rir === v ? 'on' : '') + '" data-a="rir" data-id="' + id + '" data-v="' + v + '">' + t + '</button>').join('') + '</div>' + restRow + '</div>';
     }
-    h += listCard('Заминка', '3 минуты', C.COOLDOWN, 'cool', 'cool') + wellCard();
+    h += listCard('Заминка', '3 минуты', C.COOLDOWN, 'cool', 'cool');
+    { const W = C.workoutSummary(S, date); if (W && W.done > 0) h += '<button class="btn pri" data-a="summaryopen">Итог тренировки · ' + W.done + ' / ' + W.planned + '</button>'; }
+    h += wellCard();
     h += '<p class="mut small">Запас повторов — сколько ещё повторов вы могли бы сделать. Подходы с запасом 0–3 считаются полностью, 4–5 — вполовину, 6+ — не считаются: они слишком далеки от отказа для роста. Отдых: для подтягиваний и брусьев лучше 2–3 минуты, для упражнений с резинкой хватает минуты; при меньшем отдыхе подходы засчитываются с небольшой скидкой.</p>';
     return h;
   }
@@ -257,6 +265,7 @@
     const tdeeHtml = te ? '<div class="note">По вашему весу и питанию за ' + te.days + ' дн. расход ≈ <b>' + te.tdee + ' ккал</b> (вес ' + (te.perWeek >= 0 ? '+' : '−') + r1(Math.abs(te.perWeek)) + ' кг/нед). <button class="lnk" data-a="applytdee" data-v="' + te.tdee + '">Применить</button></div>' : '';
     h += '<div class="card"><h3>Профиль</h3>' + [['weight', 'Вес, кг', pr.weight], ['tdee', 'Расход калорий, ккал', pr.tdee], ['level', 'Потенциал, % массы в месяц', pr.level], ['proteinPerKg', 'Белок, г на кг', pr.proteinPerKg], ['fatPerKg', 'Жиры, г на кг', pr.fatPerKg], ['trainKcal', 'Доп. расход в день тренировки, ккал', pr.trainKcal]].map(([k, n, v]) => '<label class="pf">' + n + '<input data-prof="' + k + '" inputmode="decimal" value="' + v + '"></label>').join('') + tdeeHtml + '<p class="mut small">Расход калорий — средний за неделю с тремя тренировками: в день тренировки цель выше, в день отдыха ниже. Подберите его по динамике веса: если вес за 2–3 недели не меняется при вашем питании, это и есть ваш расход.</p></div>';
     h += '<div class="card"><h3>Как читать токены</h3><p class="mut">Токен = условный грамм мышечной массы в день при вашем уровне. 100% — план выполнен полностью, белок и калории в норме, сон от 7,5 ч. Модель учитывает объём тренинга (с поправками на запас повторов, отдых между подходами, убывающую отдачу и восстановление между тренировками), белок, энергетический баланс и сон, но это оценка, а не измерение. Через 8–12 недель сравните сумму токенов с реальной динамикой замеров и подправьте «Потенциал» в профиле.</p></div>';
+    h += '<div class="card"><h3>Интерфейс</h3><div class="btns"><button class="btn" data-a="undo" ' + (undoStack.length ? '' : 'disabled') + '>Отменить действие' + (undoStack.length ? ' (' + undoStack.length + ')' : '') + '</button><button class="btn" data-a="haptoggle">Вибро-отклик: ' + (S.meta.nohaptic ? 'выкл' : 'вкл') + '</button></div></div>';
     h += '<div class="card"><h3>Данные</h3><div class="btns"><button class="btn" data-a="export">Экспорт</button><button class="btn" data-a="import">Импорт</button></div><p class="mut small">Данные хранятся только в браузере этого телефона. Делайте экспорт раз в пару недель.</p><textarea id="io" class="io" placeholder="Сюда попадёт копия данных или вставьте её для импорта"></textarea></div>';
     return h;
   }
@@ -274,6 +283,21 @@
         b += '<p class="mut">Цифры под полосками на упаковке (обычно 13). Нужен интернет; найденные продукты запоминаются.</p><div class="mform one"><label>Номер<input id="b_code" inputmode="numeric" autocomplete="off" value="' + esc(sheet.code) + '" placeholder="4607025392001"></label></div>' + (sheet.msg ? '<p class="minus">' + esc(sheet.msg) + '</p>' : '') + '<button class="btn pri" data-a="bcfind" ' + (sheet.status === 'loading' ? 'disabled' : '') + '>' + (sheet.status === 'loading' ? 'Ищу…' : 'Найти') + '</button>';
       }
       return shade + b + '</div>';
+    }
+    if (sheet.type === 'summary') {
+      const W = C.workoutSummary(S, date);
+      if (!W) return '';
+      const avg = W.avgRir == null ? '—' : r1(W.avgRir);
+      let b = '<div class="sheet"><h3>Итог тренировки</h3><p class="mut">' + esc(W.name) + ' · ' + fmtDate(date) + '</p>';
+      b += '<div class="sgrid"><div><b>' + W.done + '/' + W.planned + '</b><span>подходов</span></div><div><b>' + W.reps + '</b><span>повторов</span></div><div><b>' + avg + '</b><span>ср. запас</span></div><div><b>' + (W.dur >= 5 && W.dur <= 240 ? W.dur + ' мин' : '—') + '</b><span>время</span></div></div>';
+      for (const e of W.ex) {
+        const dl = e.prevTotal != null && e.sets.length ? e.total - e.prevTotal : null;
+        b += '<div class="row"><span>' + esc(e.name) + '<small>' + (e.sets.length ? e.sets.join(' · ') : 'не выполнено') + (e.pr ? ' · <i class="pr">рекорд</i>' : '') + '</small></span><b>' + (dl == null ? e.total : e.total + ' <small class="' + (dl >= 0 ? 'up' : 'dn') + '">' + (dl > 0 ? '+' : dl < 0 ? '−' : '±') + Math.abs(dl) + '</small>') + '</b></div>';
+      }
+      b += '<div class="row"><span>Потенциал дня<small>оптимальность ' + r0(W.opt) + '%</small></span><b>' + r1(W.M) + ' г</b></div>';
+      if (W.prs.length) b += '<p class="mut">Рекордов за тренировку: ' + W.prs.length + '. Так держать.</p>';
+      else if (W.done < W.planned) b += '<p class="mut">Выполнено не всё — недостающие подходы можно добавить, итог обновится.</p>';
+      return shade + b + '<button class="btn pri" data-a="close">Закрыть</button></div>';
     }
     if (sheet.type === 'meal') {
       const mm = S.meals[sheet.i], tk = mm.items.reduce((s, x) => s + x.kcal, 0), tp = mm.items.reduce((s, x) => s + x.p, 0);
@@ -295,6 +319,7 @@
     $('#sheetroot').innerHTML = sheetHtml();
     document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.id === view));
     animate();
+    restoreRip();
   }
 
   // Плавные переходы: полосы, кольцо и число идут от прежнего значения к новому
@@ -326,6 +351,12 @@
 
   function ensureEx(id) { const L = log(); L.ex = L.ex || {}; const n = C.setsFor(S, date, id); if (!L.ex[id]) L.ex[id] = { rir: 2, sets: Array(n).fill(0) }; while (L.ex[id].sets.length < n) L.ex[id].sets.push(0); L.deload = C.deloadOn(S, date); return L.ex[id]; }
   function lock() { if (S.plan[date] === undefined) S.plan[date] = C.workoutOf(S, date); }
+  function stamp() { const L = log(), n = Date.now(); L.t0 = L.t0 || n; L.t1 = n; }
+  function autoSummary() {
+    const L = log(); if (L.summaryShown) return;
+    const W = C.workoutSummary(S, date);
+    if (W && W.complete) { L.summaryShown = true; sheetNew = true; sheet = { type: 'summary' }; timer = null; drawTimer(); }
+  }
   function defReps(id, i) { const last = C.lastSets(S, id, date); return (last && last.sets[i]) || C.EXERCISES[id].reps[0]; }
 
   // ---------- Поиск по штрихкоду (Open Food Facts) ----------
@@ -395,6 +426,9 @@
       if ($('#b_save').checked && !S.foods.some((x) => x.name === it.name)) S.foods.push({ name: it.name, unit: '100 г', kcal: it.kcal, p: it.p, c: it.c, f: it.f });
       sheet = null; toast('Добавлено');
     },
+    summaryopen() { sheetNew = true; sheet = { type: 'summary' }; },
+    undo() { const snap = undoStack.pop(); if (!snap) { toast('Нечего отменять'); return false; } S = JSON.parse(snap); sheet = null; toast(undoStack.length ? 'Отменено · ещё ' + undoStack.length : 'Отменено'); },
+    haptoggle() { S.meta.nohaptic = !S.meta.nohaptic; toast(S.meta.nohaptic ? 'Вибро-отклик выключен' : 'Вибро-отклик включен'); },
     timerstop() { timer = null; drawTimer(); },
     timeradd() { if (timer) { timer.end += 30000; beeped = false; } drawTimer(); },
     fold(el) { ui[el.dataset.id] = !ui[el.dataset.id]; },
@@ -410,11 +444,11 @@
     quickopen() { sheetNew = true; const cp = C.catchup(S, date); sheet = { type: 'quick', kcal: '', p: '', kT: cp.kT, pT: cp.pT }; },
     quickpct(el) { const k = +el.dataset.v / 100; sheet.kcal = Math.round(sheet.kT * k); sheet.p = Math.round(sheet.pT * k); },
     addquick() { const kcal = num('#q_kcal') || 0, p = num('#q_p') || 0; if (!(kcal > 0 || p > 0)) return; const L = log(); L.food = L.food || []; const fq = (kcal * 0.27) / 9, cq = Math.max(0, (kcal - 4 * p - 9 * fq) / 4); L.food.push({ name: 'Быстрый ввод', kcal, p, c: cq, f: fq }); sheet = null; toast('Добавлено'); },
-    set(el) { const id = el.dataset.id, i = +el.dataset.i; const e = ensureEx(id); lock(); e.sets[i] = e.sets[i] > 0 ? 0 : defReps(id, i); if (e.sets[i] > 0) { popKey = id + ':' + i; startTimer(e.rest || C.restIdeal(id)); } },
-    rep(el) { const id = el.dataset.id, i = +el.dataset.i, d = +el.dataset.d; const e = ensureEx(id); const cur = e.sets[i] > 0 ? e.sets[i] : defReps(id, i); e.sets[i] = Math.max(1, cur + d); lock(); },
+    set(el) { const id = el.dataset.id, i = +el.dataset.i; const e = ensureEx(id); lock(); e.sets[i] = e.sets[i] > 0 ? 0 : defReps(id, i); if (e.sets[i] > 0) { popKey = id + ':' + i; stamp(); startTimer(e.rest || C.restIdeal(id)); autoSummary(); } },
+    rep(el) { const id = el.dataset.id, i = +el.dataset.i, d = +el.dataset.d; const e = ensureEx(id); const cur = e.sets[i] > 0 ? e.sets[i] : defReps(id, i); e.sets[i] = Math.max(1, cur + d); lock(); if (e.sets[i] > 0) stamp(); },
     rir(el) { ensureEx(el.dataset.id).rir = +el.dataset.v; },
     rest(el) { const e = ensureEx(el.dataset.id), v = +el.dataset.v; e.rest = e.rest === v ? 0 : v; },
-    all(el) { const id = el.dataset.id, n = C.setsFor(S, date, id), e = ensureEx(id); const full = e.sets.slice(0, n).every((x) => x > 0); for (let i = 0; i < n; i++) e.sets[i] = full ? 0 : (e.sets[i] > 0 ? e.sets[i] : defReps(id, i)); lock(); if (!full) popKey = 'all:' + id; },
+    all(el) { const id = el.dataset.id, n = C.setsFor(S, date, id), e = ensureEx(id); const full = e.sets.slice(0, n).every((x) => x > 0); for (let i = 0; i < n; i++) e.sets[i] = full ? 0 : (e.sets[i] > 0 ? e.sets[i] : defReps(id, i)); lock(); if (!full) { popKey = 'all:' + id; stamp(); autoSummary(); } },
     sleep(el) { const L = log(); const cur = L.sleep > 0 ? L.sleep : 7; const n = Math.round((cur + 0.25 * +el.dataset.d) * 4) / 4; L.sleep = Math.max(0, Math.min(14, L.sleep > 0 ? n : 7.5)); },
     weight(el) { const L = log(); const base = L.weight > 0 ? L.weight : (C.weightOn(S, date) || S.profile.weight); L.weight = Math.round((L.weight > 0 ? base + 0.1 * +el.dataset.d : base) * 10) / 10; },
     pick(el) { sheetNew = true; sheet = { type: 'food', i: +el.dataset.i, qty: 1 }; },
@@ -445,17 +479,59 @@
     },
   };
 
+  const undoStack = [];
+  let lastKey = '', lastAt = 0;
+  const LABEL = { set: 'Подход изменён', rep: 'Повторы изменены', all: 'Упражнение отмечено', rir: 'Запас изменён', rest: 'Отдых изменён', sleep: 'Сон изменён', weight: 'Вес изменён', delfood: 'Блюдо удалено', addfood: 'Блюдо добавлено', addcustom: 'Блюдо добавлено', addquick: 'Добавлено', addmeal: 'Добавлено', bcadd: 'Добавлено', wo: 'План дня изменён', plan: 'План изменён', delmeas: 'Замер удалён', addmeas: 'Замер добавлен', delmeal: 'Шаблон удалён', delpreset: 'Продукт удалён', copyfood: 'Питание скопировано', startdeload: 'Разгрузка началась', enddeload: 'Разгрузка закончена', flag: 'Отметка изменена', pain: 'Отметка изменена', saveschedule: 'Расписание сохранено', applytdee: 'Расход обновлён', applylevel: 'Потенциал обновлён', savetpl: 'Шаблон сохранён', import: 'Данные загружены' };
+  const COALESCE = new Set(['rep', 'sleep', 'weight', 'rir', 'rest']);
+  function haptic() {
+    if (S.meta.nohaptic) return;
+    try {
+      let l = $('#hp');
+      if (!l) { l = document.createElement('label'); l.id = 'hp'; l.setAttribute('aria-hidden', 'true'); l.style.cssText = 'position:fixed;left:-99px;top:0;opacity:0;pointer-events:none'; l.innerHTML = '<input type="checkbox" switch>'; document.body.appendChild(l); }
+      l.click();
+    } catch (e) { /* вибро-отклик недоступен */ }
+  }
   document.addEventListener('click', (ev) => {
     const el = ev.target.closest('[data-a]');
     if (!el || el.disabled) return;
+    const a = el.dataset.a;
     const keep = $('#io') && ev.target.closest('[data-a="export"]');
-    if (['tab', 'day', 'wo'].includes(el.dataset.a)) enter = true;
-    const r = actions[el.dataset.a] && actions[el.dataset.a](el);
+    if (['tab', 'day', 'wo'].includes(a)) enter = true;
+    if (a !== 'tab') haptic();
+    const pre = JSON.stringify(S); tmsg = null;
+    const r = actions[a] && actions[a](el);
+    if (a !== 'undo' && a !== 'export' && JSON.stringify(S) !== pre) {
+      const key = a + ':' + (el.dataset.id || '') + ':' + (el.dataset.i || '') + ':' + (el.dataset.d || '');
+      const same = COALESCE.has(a) && key.split(':').slice(0, 3).join(':') === lastKey && Date.now() - lastAt < 2000;
+      if (!same) { undoStack.push(pre); if (undoStack.length > 40) undoStack.shift(); }
+      lastKey = key.split(':').slice(0, 3).join(':'); lastAt = Date.now();
+      if (sheet && sheet.type === 'summary') { /* поверх итога тост не показываем */ } else if (a === 'set' || a === 'all' || a === 'rep' || COALESCE.has(a) || LABEL[a] || tmsg) toast(tmsg || LABEL[a] || 'Изменено', true);
+    }
     save();
     if (keep) { render(); $('#io').value = JSON.stringify(S); return; }
     if (r !== false) render();
-    if (el.dataset.a === 'tab') window.scrollTo(0, scrollY[view] || 0);
+    if (a === 'tab') window.scrollTo(0, scrollY[view] || 0);
   });
+
+  // Круговая «рябь» от касания (после перерисовки восстанавливается на новом элементе)
+  let lastRip = null;
+  function addRip(el, x, y, elapsed) {
+    const r = el.getBoundingClientRect(), d = Math.max(r.width, r.height) * 1.6, sp = document.createElement('span');
+    sp.className = 'rip'; sp.style.cssText = 'width:' + d + 'px;height:' + d + 'px;left:' + (x - r.left - d / 2) + 'px;top:' + (y - r.top - d / 2) + 'px;animation-delay:-' + elapsed + 'ms';
+    el.classList.add('rp'); el.appendChild(sp); setTimeout(() => sp.remove(), 600 - elapsed);
+  }
+  function restoreRip() {
+    if (!lastRip || Date.now() - lastRip.t > 450) return;
+    const q = lastRip.sel ? $('#main ' + lastRip.sel) || $(lastRip.sel) : null;
+    if (q && !q.querySelector('.rip')) addRip(q, lastRip.x, lastRip.y, Date.now() - lastRip.t);
+  }
+  document.addEventListener('pointerdown', (ev) => {
+    const el = ev.target.closest('.btn,.chip,.chk,.allb,.step button,.datenav button,.card.link,#tabs button,#toast button,#timer button');
+    if (!el || el.disabled) return;
+    addRip(el, ev.clientX, ev.clientY, 0);
+    const a = el.dataset.a;
+    lastRip = { t: Date.now(), x: ev.clientX, y: ev.clientY, sel: a ? '[data-a="' + a + '"]' + ['id', 'i', 'd', 'v'].filter((k) => el.dataset[k] !== undefined).map((k) => '[data-' + k + '="' + el.dataset[k] + '"]').join('') : '' };
+  }, { passive: true });
   document.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && ev.target.id === 'b_code') { ev.preventDefault(); const b = document.querySelector('[data-a=bcfind]'); if (b) b.click(); } });
   document.addEventListener('change', (ev) => {
     if (ev.target.id === 'note') { log().note = ev.target.value; save(); return; }

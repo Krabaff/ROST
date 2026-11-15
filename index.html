@@ -121,7 +121,37 @@ button:active:not(:disabled){transform:scale(.94)}
 .lst{margin-top:6px}.li{display:flex;flex-direction:column;margin:12px 0}.li b{font-size:15px;font-weight:600}.li span{color:var(--mut);font-size:13px}
 .hl{fill:var(--mut);font-size:11px}
 .bar i.warn{background:var(--mid)}
-@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* Живые кнопки */
+button{transition:transform .38s cubic-bezier(.34,1.56,.64,1),opacity .12s,background .2s,box-shadow .2s}
+button:active:not(:disabled){transform:scale(.93);transition-duration:.07s}
+.card.link{transition:transform .38s cubic-bezier(.34,1.56,.64,1),background .2s}
+.card.link:active{transform:scale(.985);transition-duration:.07s;background:var(--card2)}
+.rp{position:relative;overflow:hidden}
+.rip{position:absolute;border-radius:50%;background:rgba(255,255,255,.26);transform:scale(0);animation:rip .55s ease-out forwards;pointer-events:none}
+.btn.pri .rip,.chip.on .rip,.chk.on .rip,.allb.on .rip{background:rgba(0,0,0,.16)}
+@keyframes rip{to{transform:scale(1);opacity:0}}
+.btn{background:linear-gradient(180deg,#262a33,#1e2127);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 1px 2px rgba(0,0,0,.35)}
+.btn.pri{background:linear-gradient(180deg,#90eab2,#6cd291);box-shadow:inset 0 1px 0 rgba(255,255,255,.45),0 6px 18px -6px rgba(126,224,161,.55)}
+.btn.ghost{background:none;box-shadow:none}
+.chip{box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
+.chip.on{background:linear-gradient(180deg,#90eab2,#6cd291);box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 4px 14px -5px rgba(126,224,161,.6)}
+.chip.s.on{background:linear-gradient(180deg,#90eab2,#6cd291)}
+.chk{background:linear-gradient(180deg,#2a2e37,#1e2127);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)}
+.chk.on{background:linear-gradient(180deg,#90eab2,#6cd291);box-shadow:inset 0 1px 0 rgba(255,255,255,.45),0 4px 14px -4px rgba(126,224,161,.65)}
+.allb.on{background:linear-gradient(180deg,#90eab2,#6cd291);box-shadow:0 4px 12px -4px rgba(126,224,161,.55)}
+.step button:active{background:rgba(255,255,255,.1);border-radius:10px}
+#tabs svg{transition:transform .35s cubic-bezier(.34,1.56,.64,1)}
+#tabs button.on svg{transform:translateY(-2px) scale(1.12)}
+#toast{display:flex;align-items:center;gap:12px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+#toast.u{padding-right:8px}#toast.u button{pointer-events:auto}
+#toast button{background:rgba(126,224,161,.16);color:var(--acc);border-radius:999px;padding:6px 12px;font-size:14px;font-weight:600}
+.sgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0 6px}
+.sgrid div{background:var(--card2);border-radius:12px;padding:10px 4px;text-align:center}
+.sgrid b{display:block;font-size:17px}.sgrid span{font-size:11.5px;color:var(--mut)}
+.pr{font-style:normal;color:var(--acc);font-weight:600}
+small.up{color:var(--acc)}small.dn{color:var(--low)}
+.sheet .btn.pri{margin-top:14px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.rip{display:none}}
 </style>
 </head>
 <body>

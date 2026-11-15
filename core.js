@@ -428,6 +428,30 @@
     return out;
   }
 
+  // ---------- Итог тренировки ----------
+  function workoutSummary(state, date) {
+    const log = state.logs[date] || {}, wo = workoutOf(state, date);
+    if (!wo || !PLAN[wo]) return null;
+    const ex = [], prs = [];
+    let planned = 0, done = 0, vol = 0, reps = 0, rirSum = 0, rirN = 0;
+    for (const id of PLAN[wo].ex) {
+      const n = setsFor(state, date, id), e = (log.ex && log.ex[id]) || { sets: [] };
+      const sets = (e.sets || []).slice(0, n).filter((r) => r > 0);
+      planned += n; done += sets.length;
+      const total = sets.reduce((a, b) => a + b, 0); reps += total;
+      if (sets.length) { rirSum += (e.rir == null ? 2 : e.rir) * sets.length; rirN += sets.length; }
+      const prev = exerciseSessions(state, id, date);
+      const best = prev.length ? Math.max(...prev.map((x) => x.sets.reduce((a, b) => a + b, 0))) : 0;
+      const bestSet = prev.length ? Math.max(...prev.map((x) => Math.max(...x.sets))) : 0;
+      const pr = sets.length && prev.length ? (total > best ? 'total' : Math.max(...sets) > bestSet ? 'set' : '') : '';
+      if (pr) prs.push({ id, kind: pr });
+      ex.push({ id, name: EXERCISES[id].name, sets, planned: n, total, pr, prevTotal: prev.length ? prev[prev.length - 1].sets.reduce((a, b) => a + b, 0) : null });
+    }
+    const dur = log.t0 && log.t1 && log.t1 > log.t0 ? Math.round((log.t1 - log.t0) / 60000) : null;
+    const R = computeDay(state, date);
+    return { wo, name: PLAN[wo].name, ex, planned, done, reps, avgRir: rirN ? rirSum / rirN : null, dur, prs, M: R.M, opt: R.opt, complete: planned > 0 && done >= planned };
+  }
+
   // ---------- Разгрузка ----------
   const deloadOn = (state, d) => !!(state.deload && d >= state.deload.from && d <= state.deload.to);
   const setsFor = (state, d, id) => (deloadOn(state, d) ? Math.max(2, Math.ceil(EXERCISES[id].sets / 2)) : EXERCISES[id].sets);
@@ -515,5 +539,5 @@
     return { name, kcal, p: num(n.proteins_100g), c: num(n.carbohydrates_100g), f: num(n.fat_100g) };
   }
 
-  return { targets, dayTDEE, nextWorkout, trainingDay, validBarcode, parseOFF, deloadOn, setsFor, deloadSuggested, restIdeal, painAdvice, catchup, weeklyReview, sleepVsPerformance, WARMUP, COOLDOWN, MOBILITY, PAIN, defaultMeals, slopeOf, weightTrend, estimateTDEE, navyBF, calibration, exerciseProgress, restFactor, workoutOf, projectWeek, windowSets, dayRaw, GROUPS, EXERCISES, PLAN, PLAN_SETS, TPLAN, defaultState, computeDay, weeklyTokens, declining, lastSets, exerciseSessions, groupSets, foodTotals, energyScore, sleepOne, sleepInfo, quality, gmax, weightOn, dstr, parse, addDays, weekday };
+  return { targets, dayTDEE, nextWorkout, trainingDay, validBarcode, parseOFF, deloadOn, setsFor, deloadSuggested, restIdeal, painAdvice, catchup, weeklyReview, sleepVsPerformance, WARMUP, COOLDOWN, MOBILITY, PAIN, defaultMeals, slopeOf, weightTrend, estimateTDEE, navyBF, calibration, exerciseProgress, workoutSummary, restFactor, workoutOf, projectWeek, windowSets, dayRaw, GROUPS, EXERCISES, PLAN, PLAN_SETS, TPLAN, defaultState, computeDay, weeklyTokens, declining, lastSets, exerciseSessions, groupSets, foodTotals, energyScore, sleepOne, sleepInfo, quality, gmax, weightOn, dstr, parse, addDays, weekday };
 });
