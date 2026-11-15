@@ -318,6 +318,7 @@
     $('#main').innerHTML = body;
     $('#sheetroot').innerHTML = sheetHtml();
     document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.id === view));
+    { const ind = $('#tind'), k = ['today', 'train', 'plan', 'food', 'progress'].indexOf(view); if (ind) ind.style.transform = 'translateX(' + (k * 100) + '%)'; }
     animate();
     restoreRip();
   }
@@ -514,22 +515,53 @@
   });
 
 
-  // Свайп влево/вправо — соседняя вкладка (не срабатывает на прокручиваемых рядах, полях и в шторке)
+  // Свайп по экрану: контент следует за пальцем, затем плавно уезжает и въезжает новая вкладка
   const TABS = ['today', 'train', 'plan', 'food', 'progress'];
   let sw = null;
+  function goTab(i, dir, instant) {
+    if (i < 0 || i >= TABS.length || TABS[i] === view) return false;
+    scrollY[view] = window.scrollY; view = TABS[i]; render(); window.scrollTo(0, scrollY[view] || 0);
+    if (!instant) {
+      const m = $('#main'); m.style.transition = 'none'; m.style.opacity = '0'; m.style.transform = 'translateX(' + (dir * 36) + 'px)';
+      void m.offsetWidth; m.style.transition = 'transform .38s cubic-bezier(.22,.9,.3,1),opacity .3s ease'; m.style.opacity = ''; m.style.transform = '';
+    }
+    return true;
+  }
   document.addEventListener('touchstart', (ev) => {
     const t = ev.touches[0];
-    sw = ev.touches.length === 1 && !sheet && !ev.target.closest('.chips,.seg,input,textarea,.sheet,#timer,#toast,.heat') ? { x: t.clientX, y: t.clientY, t: Date.now() } : null;
+    sw = ev.touches.length === 1 && !sheet && !ev.target.closest('.chips,.seg,input,textarea,.sheet,#timer,#toast,.heat,#tabs') ? { x: t.clientX, y: t.clientY, t: Date.now(), lock: null } : null;
+  }, { passive: true });
+  document.addEventListener('touchmove', (ev) => {
+    if (!sw) return;
+    const t = ev.touches[0], dx = t.clientX - sw.x, dy = t.clientY - sw.y;
+    if (sw.lock === null && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) sw.lock = Math.abs(dx) > Math.abs(dy) * 1.4 ? 'h' : 'v';
+    if (sw.lock !== 'h') return;
+    const i = TABS.indexOf(view), edge = (dx > 0 && i === 0) || (dx < 0 && i === TABS.length - 1), k = edge ? 0.15 : 0.5, m = $('#main');
+    m.style.transition = 'none'; m.style.transform = 'translateX(' + (dx * k) + 'px)'; m.style.opacity = String(1 - Math.min(0.5, Math.abs(dx) / 500));
   }, { passive: true });
   document.addEventListener('touchend', (ev) => {
     if (!sw) return;
-    const t = ev.changedTouches[0], dx = t.clientX - sw.x, dy = t.clientY - sw.y, dt = Date.now() - sw.t; sw = null;
-    if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.8 || dt > 700) return;
-    const i = TABS.indexOf(view) + (dx < 0 ? 1 : -1);
-    if (i < 0 || i >= TABS.length) return;
-    scrollY[view] = window.scrollY; view = TABS[i]; render(); window.scrollTo(0, scrollY[view] || 0);
-    const m = $('#main'); m.classList.remove('swl', 'swr'); void m.offsetWidth; m.classList.add(dx < 0 ? 'swl' : 'swr');
+    const w = sw; sw = null;
+    if (w.lock !== 'h') return;
+    const t = ev.changedTouches[0], dx = t.clientX - w.x, m = $('#main'), vel = Math.abs(dx) / Math.max(1, Date.now() - w.t);
+    const go = (Math.abs(dx) > 80 || (Math.abs(dx) > 40 && vel > 0.5)) && goTab(TABS.indexOf(view) + (dx < 0 ? 1 : -1), dx < 0 ? 1 : -1);
+    if (!go) { m.style.transition = 'transform .35s cubic-bezier(.22,.9,.3,1),opacity .3s'; m.style.transform = ''; m.style.opacity = ''; }
   }, { passive: true });
+
+  // Свайп по нижней панели: палец скользит по вкладкам, активная следует за ним
+  let tb = null, tbDrag = false;
+  const tabAt = (x) => { const r = $('#tabs').getBoundingClientRect(); return Math.max(0, Math.min(TABS.length - 1, Math.floor(((x - r.left) / r.width) * TABS.length))); };
+  document.addEventListener('touchstart', (ev) => { tb = ev.target.closest('#tabs') ? { x: ev.touches[0].clientX, moved: false } : null; tbDrag = false; }, { passive: true });
+  document.addEventListener('touchmove', (ev) => {
+    if (!tb) return;
+    const x = ev.touches[0].clientX;
+    if (!tb.moved && Math.abs(x - tb.x) < 12) return;
+    tb.moved = true; tbDrag = true;
+    const i = tabAt(x), cur = TABS.indexOf(view);
+    if (i !== cur) { if (goTab(i, i > cur ? 1 : -1)) haptic(); }
+  }, { passive: true });
+  document.addEventListener('touchend', () => { tb = null; if (tbDrag) setTimeout(() => { tbDrag = false; }, 350); }, { passive: true });
+  document.addEventListener('click', (ev) => { if (tbDrag && ev.target.closest('#tabs')) { ev.stopPropagation(); ev.preventDefault(); } }, true);
 
   // Круговая «рябь» от касания (после перерисовки восстанавливается на новом элементе)
   let lastRip = null;
@@ -544,7 +576,7 @@
     if (q && !q.querySelector('.rip')) addRip(q, lastRip.x, lastRip.y, Date.now() - lastRip.t);
   }
   document.addEventListener('pointerdown', (ev) => {
-    const el = ev.target.closest('.btn,.chip,.chk,.allb,.step button,.datenav button,.card.link,#tabs button,#toast button,#timer button');
+    const el = ev.target.closest('.btn,.chip,.chk,.allb,.step button,.datenav button,.card.link,#toast button,#timer button');
     if (!el || el.disabled) return;
     addRip(el, ev.clientX, ev.clientY, 0);
     const a = el.dataset.a;
