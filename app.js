@@ -17,12 +17,15 @@
     try { const raw = localStorage.getItem(KEY); if (raw) st = JSON.parse(raw); } catch (e) { st = mem; }
     if (!st) st = mem;
     const def = C.defaultState();
-    if (!st) { def.meas = []; return def; }
+    if (!st) { def.meas = []; def.meta = {}; return def; }
     st.profile = Object.assign({}, def.profile, st.profile);
-    st.logs = st.logs || {}; st.foods = st.foods || def.foods; st.schedule = st.schedule || def.schedule; st.meas = st.meas || []; st.plan = st.plan || {};
+    st.logs = st.logs || {}; st.foods = st.foods || def.foods; st.schedule = st.schedule || def.schedule; st.meas = st.meas || []; st.plan = st.plan || {}; st.meta = st.meta || {};
     return st;
   }
   let S = load();
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { /* не критично */ }
+  let toastT = null;
+  function toast(msg) { let t = $('#toast'); if (!t) { t = document.createElement('div'); t.id = 'toast'; document.body.appendChild(t); } t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2000); }
   function save() { mem = S; try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { /* хранилище недоступно */ } }
 
   let view = 'today';
@@ -58,6 +61,7 @@
     h += '<div class="ringwrap"><svg viewBox="0 0 180 180" class="ring"><circle cx="90" cy="90" r="' + R_ + '" class="rbg"/><circle cx="90" cy="90" r="' + R_ + '" class="rfg ' + col + '" stroke-dasharray="' + circ + '" stroke-dashoffset="' + (circ * (1 - pct / 100)) + '" transform="rotate(-90 90 90)"/></svg><div class="ringtxt"><div class="big">' + r0(R.opt) + '<small>%</small></div><div class="tok">' + (R.tokens >= 0 ? '+' : '−') + r1(Math.abs(R.tokens)) + ' г</div></div></div>';
     h += '<p class="cap">оптимальность дня · потенциал роста мышц, граммы (модельная оценка)</p>';
     if (R.missing.length) h += '<div class="note">Не внесено: ' + R.missing.map((m) => (m === 'food' ? 'питание' : 'сон')).join(', ') + '. Пока это считается как наполовину выполненное.</div>';
+    if (Object.keys(S.logs).length >= 5 && (!S.meta.lastExport || Date.now() - S.meta.lastExport > 14 * 864e5)) h += '<button class="note link" data-a="tab" data-id="progress">Давно не было резервной копии данных. Откройте «Прогресс» → «Данные» → «Экспорт».</button>';
     h += '<div class="card"><div class="row"><span>Тренировки <small>' + r1(R.setsEff) + ' из ' + r0(R.setsPlan) + ' зачётных подходов за 7 дней</small></span><b>' + r0(R.T * 100) + '%</b></div>' + bar(R.T) +
       '<div class="row"><span>Белок <small>' + r0(R.food.p) + ' / ' + Math.round(S.profile.proteinPerKg * S.profile.weight) + ' г</small></span><b>' + r0(R.P * 100) + '%</b></div>' + bar(R.P) +
       '<div class="row"><span>Калории <small>' + r0(R.food.kcal) + ' / ' + Math.round(S.profile.tdee * 1.08) + '</small></span><b>' + r0(R.E * 100) + '%</b></div>' + bar(R.E) +
@@ -84,8 +88,9 @@
       const ex = C.EXERCISES[id];
       const e = L[id] || { rir: 2, sets: [] };
       const last = C.lastSets(S, id, date);
+      const ready = last && last.sets.length >= ex.sets && last.sets.every((x) => x >= ex.reps[1]);
       const doneN = (e.sets || []).filter((x) => x > 0).length;
-      h += '<div class="card ex ' + (doneN === ex.sets ? 'full' : '') + '"><div class="exh"><b>' + esc(ex.name) + '</b><button class="allb ' + (doneN === ex.sets ? 'on' : '') + '" data-a="all" data-id="' + id + '">' + (doneN === ex.sets ? '✓ Готово' : 'Отметить все') + '</button></div><p class="mut"><span class="tgt">' + ex.sets + '×' + ex.reps[0] + '–' + ex.reps[1] + '</span> · ' + esc(ex.tip) + (last ? ' · прошлый раз: ' + last.sets.join(', ') : '') + '</p>';
+      h += '<div class="card ex ' + (doneN === ex.sets ? 'full' : '') + '"><div class="exh"><b>' + esc(ex.name) + '</b><button class="allb ' + (doneN === ex.sets ? 'on' : '') + '" data-a="all" data-id="' + id + '">' + (doneN === ex.sets ? '✓ Готово' : 'Отметить все') + '</button></div><p class="mut"><span class="tgt">' + ex.sets + '×' + ex.reps[0] + '–' + ex.reps[1] + '</span> · ' + esc(ex.tip) + (last ? ' · прошлый раз: ' + last.sets.join(', ') : '') + '</p>' + (ready ? '<p class="small plus">Все подходы были на верхней границе — пора усложнить: пауза внизу, резинка слабее или дополнительный вес.</p>' : '');
       for (let i = 0; i < ex.sets; i++) {
         const v = (e.sets && e.sets[i]) || 0;
         const sug = v || (last && last.sets[i]) || ex.reps[0];
@@ -104,7 +109,7 @@
   // ---------- Экран: План недели ----------
   function viewPlan() {
     const P = C.projectWeek(S, TODAY, 7);
-    const B = C.projectWeek(Object.assign({}, S, { plan: {} }), TODAY, 7);
+    const B = C.projectWeek(Object.assign({}, S, { plan: {}, schedule: { 1: 'A', 3: 'B', 5: 'C' } }), TODAY, 7);
     const sum = (X) => X.days.reduce((s, x) => s + x.r.tokens, 0);
     const tot = sum(P), diff = tot - sum(B);
     const sess = P.days.filter((x) => x.wo && C.PLAN[x.wo]).length;
@@ -114,6 +119,7 @@
       const dt = C.parse(x.date), tk = x.r.tokens;
       return '<div class="prow"><div class="pd"><b>' + (x.date === TODAY ? 'Сегодня' : DAYS[dt.getDay()]) + '</b><span>' + dt.getDate() + ' ' + MONTHS[dt.getMonth()] + '</span></div><div class="seg">' + ['A', 'B', 'C', ''].map((k) => '<button class="chip s ' + (x.wo === k ? 'on' : '') + '" data-a="plan" data-id="' + x.date + '" data-v="' + k + '">' + (k || 'Отдых') + '</button>').join('') + '</div><div class="pt ' + (tk >= 0 ? 'plus' : 'minus') + '">' + (tk >= 0 ? '+' : '−') + r1(Math.abs(tk)) + '</div>' + (x.wo && C.PLAN[x.wo] && x.r.R < 0.95 ? '<div class="pw">Мало отдыха между тренировками: −' + r0((1 - x.r.R) * 100) + '% к зачёту</div>' : '') + '</div>';
     }).join('') + '<p class="mut small">Число справа — токены этого дня (г). Тренировка влияет на токены следующих 7 дней, поэтому день отдыха после неё тоже «зарабатывает».</p></div>';
+    h += '<button class="btn" data-a="saveschedule">Сделать этот выбор расписанием по умолчанию</button>';
     const tips = [];
     if (sess < 3) tips.push('Меньше трёх тренировок в неделю — объём ниже плана, прирост падает.');
     if (sess > 4) tips.push('Больше четырёх тренировок на тот же набор мышц не добавят роста, зато снижают восстановление.');
@@ -135,12 +141,14 @@
       '<div class="row"><span>Углеводы</span><b>' + r0(ft.c) + ' г</b></div><div class="row"><span>Жиры</span><b>' + r0(ft.f) + ' г</b></div></div>';
     const items = L.food || [];
     if (items.length) h += '<div class="card"><h3>Съедено</h3>' + items.map((it, i) => '<div class="row item"><span>' + esc(it.name) + '<small>' + r0(it.kcal) + ' ккал · Б ' + r0(it.p) + ' · У ' + r0(it.c) + ' · Ж ' + r0(it.f) + '</small></span><button class="x" data-a="delfood" data-i="' + i + '" aria-label="Удалить">×</button></div>').join('') + '</div>';
+    const yf = (S.logs[C.addDays(date, -1)] || {}).food;
+    if (!items.length && yf && yf.length) h += '<button class="btn" data-a="copyfood">Скопировать питание со вчера (' + r0(yf.reduce((s, x) => s + x.kcal, 0)) + ' ккал)</button>';
     h += '<h3 class="sec">Добавить</h3><div class="chips wrap">' + S.foods.map((f, i) => '<button class="chip" data-a="pick" data-i="' + i + '">' + esc(f.name) + '</button>').join('') + '<button class="chip plusb" data-a="custom">+ своё</button></div>';
     return h;
   }
 
   // ---------- Экран: Прогресс ----------
-  function bf(m, height) { const d = m.waist - m.neck; if (!(d > 0)) return null; return 495 / (1.0324 - 0.19077 * Math.log10(d) + 0.15456 * Math.log10(height)) - 450; }
+  const bf = (m, height) => C.navyBF(m, height);
   function viewProgress() {
     const days = []; for (let i = 13; i >= 0; i--) days.push(C.addDays(TODAY, -i));
     const vals = days.map((d) => C.computeDay(S, d).tokens);
@@ -152,7 +160,26 @@
     const sum14 = vals.reduce((a, b) => a + b, 0);
     let h = '<h2>Прогресс</h2><div class="card"><h3>Токены за 14 дней</h3>' + svg + '<div class="row"><span>Сумма</span><b>' + r1(sum14) + ' г</b></div><div class="row"><span>В среднем в день</span><b>' + r1(sum14 / 14) + ' г</b></div></div>';
     const ws = []; for (const d of Object.keys(S.logs).sort()) if (S.logs[d].weight > 0) ws.push([d, S.logs[d].weight]);
-    if (ws.length) { const l = ws.slice(-8); h += '<div class="card"><h3>Вес</h3>' + l.map(([d, w]) => '<div class="row"><span>' + fmtDate(d) + '</span><b>' + r1(w) + ' кг</b></div>').join('') + '</div>'; }
+    if (ws.length >= 2) {
+      const l = ws.slice(-30), mn = Math.min(...l.map((x) => x[1])) - 0.3, mx = Math.max(...l.map((x) => x[1])) + 0.3;
+      const pts = l.map((x, i) => (l.length === 1 ? 150 : 10 + (i / (l.length - 1)) * 280).toFixed(1) + ',' + (90 - ((x[1] - mn) / (mx - mn)) * 75).toFixed(1)).join(' ');
+      const tr = C.weightTrend(S, TODAY);
+      h += '<div class="card"><h3>Вес</h3><svg viewBox="0 0 300 100" class="chart"><polyline points="' + pts + '" class="wl"/></svg><div class="row"><span>Сейчас</span><b>' + r1(l[l.length - 1][1]) + ' кг</b></div>' + (tr != null ? '<div class="row"><span>Тренд за 4 недели</span><b class="' + (tr >= 0 ? 'plus' : 'minus') + '">' + (tr >= 0 ? '+' : '−') + r1(Math.abs(tr)) + ' кг/нед</b></div><p class="mut small">Для набора мышц ориентир — плюс 0,1–0,3 кг в неделю: больше — часть уйдёт в жир.</p>' : '') + '</div>';
+    } else if (ws.length) h += '<div class="card"><h3>Вес</h3><div class="row"><span>' + fmtDate(ws[0][0]) + '</span><b>' + r1(ws[0][1]) + ' кг</b></div><p class="mut small">График появится после второго взвешивания.</p></div>';
+    const cal = C.calibration(S, TODAY);
+    h += '<div class="card"><h3>Сверка модели с замерами</h3>';
+    if (!cal) h += '<p class="mut">Внесите замеры минимум дважды с интервалом от двух недель. Тогда здесь появится сравнение прогноза токенов с реальным изменением.</p>';
+    else {
+      const dl = cal.dLbmKg;
+      h += '<div class="row"><span>Период</span><b>' + cal.days + ' дн.</b></div><div class="row"><span>Токены за период</span><b>' + r1(cal.tokensG / 1000) + ' кг</b></div>' +
+        (dl != null ? '<div class="row"><span>Сухая масса по замерам</span><b class="' + (dl >= 0 ? 'plus' : 'minus') + '">' + (dl >= 0 ? '+' : '−') + r1(Math.abs(dl)) + ' кг</b></div>' : '') +
+        '<div class="row"><span>Бицепс</span><b>' + (cal.dBiceps >= 0 ? '+' : '−') + r1(Math.abs(cal.dBiceps)) + ' см</b></div><div class="row"><span>Грудь</span><b>' + (cal.dChest >= 0 ? '+' : '−') + r1(Math.abs(cal.dChest)) + ' см</b></div><div class="row"><span>Талия</span><b>' + (cal.dWaist >= 0 ? '+' : '−') + r1(Math.abs(cal.dWaist)) + ' см</b></div>';
+      if (cal.factor != null) h += '<p class="mut">Факт составил ≈ ' + r0(cal.factor * 100) + '% от прогноза модели. Это ориентир, а не точное измерение: погрешность замера жира ±3–4 п.п.</p>' + (Math.abs(cal.factor - 1) > 0.15 ? '<button class="btn" data-a="applylevel" data-v="' + (Math.round(S.profile.level * cal.factor * 100) / 100) + '">Подстроить потенциал до ' + r1(S.profile.level * cal.factor) + '%</button>' : '');
+      else h += '<p class="mut">Пока слишком короткий период: ошибка замера жира по формуле Navy (±3–4 п.п.) сопоставима с ожидаемым приростом. Нужно 8–12 недель.</p>';
+    }
+    h += '</div>';
+    const ep = C.exerciseProgress(S);
+    if (ep.length) h += '<div class="card"><h3>Прогресс в упражнениях</h3>' + ep.map((x) => '<div class="row"><span>' + esc(C.EXERCISES[x.id].name) + '<small>' + x.n + ' тренировок · лучшая ' + x.best + ' повт.</small></span><b class="' + (x.last >= x.first ? 'plus' : 'minus') + '">' + x.first + ' → ' + x.last + '</b></div>').join('') + '<p class="mut small">Сумма повторов за тренировку: первая и последняя.</p></div>';
 
     h += '<div class="card"><h3>Замеры</h3>';
     const m = S.meas;
@@ -162,10 +189,12 @@
       h += '<p class="mut">Последний: ' + fmtDate(l0.date) + '</p>' + [['biceps', 'Бицепс (напряжён)'], ['chest', 'Грудь'], ['waist', 'Талия'], ['neck', 'Шея']].map(([k, n]) => '<div class="row"><span>' + n + '</span><b>' + r1(l0[k]) + ' см' + (m.length > 1 ? ' <small class="' + ((l0[k] - f0[k]) >= 0 ? 'plus' : 'minus') + '">' + ((l0[k] - f0[k]) >= 0 ? '+' : '−') + r1(Math.abs(l0[k] - f0[k])) + '</small>' : '') + '</b></div>').join('');
       if (b != null) { const lbm = S.profile.weight * (1 - b / 100); h += '<div class="row"><span>Жир (Navy, ±3–4 п.п.)</span><b>' + r1(b) + '%</b></div><div class="row"><span>Сухая масса ≈</span><b>' + r1(lbm) + ' кг</b></div>'; }
     } else h += '<p class="mut">Пока нет замеров. Вносите раз в 2–4 недели, утром натощак, в одинаковых условиях.</p>';
-    h += '<div class="mform">' + [['biceps', 'бицепс'], ['chest', 'грудь'], ['waist', 'талия'], ['neck', 'шея']].map(([k, n]) => '<label>' + n + ', см<input id="m_' + k + '" inputmode="decimal" placeholder="' + (m.length ? m[m.length - 1][k] : '') + '"></label>').join('') + '</div><button class="btn" data-a="addmeas">Сохранить замеры</button></div>';
+    h += '<div class="mform">' + [['biceps', 'бицепс'], ['chest', 'грудь'], ['waist', 'талия'], ['neck', 'шея']].map(([k, n]) => '<label>' + n + ', см<input id="m_' + k + '" inputmode="decimal" placeholder="' + (m.length ? m[m.length - 1][k] : '') + '"></label>').join('') + '</div><button class="btn" data-a="addmeas">Сохранить замеры</button>' + (m.length ? '<button class="btn ghost" data-a="delmeas">Удалить последний замер</button>' : '') + '</div>';
 
     const pr = S.profile;
-    h += '<div class="card"><h3>Профиль</h3>' + [['weight', 'Вес, кг', pr.weight], ['tdee', 'Расход калорий, ккал', pr.tdee], ['level', 'Потенциал, % массы в месяц', pr.level], ['proteinPerKg', 'Белок, г на кг', pr.proteinPerKg]].map(([k, n, v]) => '<label class="pf">' + n + '<input data-prof="' + k + '" inputmode="decimal" value="' + v + '"></label>').join('') + '<p class="mut small">Расход калорий (TDEE) подберите по динамике веса: если вес за 2–3 недели не меняется при вашем питании, это и есть ваш расход.</p></div>';
+    const te = C.estimateTDEE(S, TODAY);
+    const tdeeHtml = te ? '<div class="note">По вашему весу и питанию за ' + te.days + ' дн. расход ≈ <b>' + te.tdee + ' ккал</b> (вес ' + (te.perWeek >= 0 ? '+' : '−') + r1(Math.abs(te.perWeek)) + ' кг/нед). <button class="lnk" data-a="applytdee" data-v="' + te.tdee + '">Применить</button></div>' : '';
+    h += '<div class="card"><h3>Профиль</h3>' + [['weight', 'Вес, кг', pr.weight], ['tdee', 'Расход калорий, ккал', pr.tdee], ['level', 'Потенциал, % массы в месяц', pr.level], ['proteinPerKg', 'Белок, г на кг', pr.proteinPerKg]].map(([k, n, v]) => '<label class="pf">' + n + '<input data-prof="' + k + '" inputmode="decimal" value="' + v + '"></label>').join('') + tdeeHtml + '<p class="mut small">Расход калорий (TDEE) подберите по динамике веса: если вес за 2–3 недели не меняется при вашем питании, это и есть ваш расход.</p></div>';
     h += '<div class="card"><h3>Как читать токены</h3><p class="mut">Токен = условный грамм мышечной массы в день при вашем уровне. 100% — план выполнен полностью, белок и калории в норме, сон от 7,5 ч. Модель учитывает объём тренинга (с поправками на запас повторов, отдых между подходами, убывающую отдачу и восстановление между тренировками), белок, энергетический баланс и сон, но это оценка, а не измерение. Через 8–12 недель сравните сумму токенов с реальной динамикой замеров и подправьте «Потенциал» в профиле.</p></div>';
     h += '<div class="card"><h3>Данные</h3><div class="btns"><button class="btn" data-a="export">Экспорт</button><button class="btn" data-a="import">Импорт</button></div><p class="mut small">Данные хранятся только в браузере этого телефона. Делайте экспорт раз в пару недель.</p><textarea id="io" class="io" placeholder="Сюда попадёт копия данных или вставьте её для импорта"></textarea></div>';
     return h;
@@ -226,6 +255,11 @@
     day(el) { const n = C.addDays(date, +el.dataset.d); if (n <= TODAY) date = n; },
     wo(el) { S.plan[date] = el.dataset.id; },
     plan(el) { S.plan[el.dataset.id] = el.dataset.v; },
+    saveschedule() { const P = C.projectWeek(S, TODAY, 7); const sch = {}; P.days.forEach((x) => { if (x.wo) sch[C.weekday(x.date)] = x.wo; }); S.schedule = sch; toast('Расписание сохранено'); },
+    copyfood() { const y = (S.logs[C.addDays(date, -1)] || {}).food || []; log().food = y.map((x) => Object.assign({}, x)); toast('Питание скопировано'); },
+    applytdee(el) { S.profile.tdee = +el.dataset.v; toast('Расход обновлён'); },
+    applylevel(el) { S.profile.level = +el.dataset.v; toast('Потенциал обновлён'); },
+    delmeas() { S.meas.pop(); },
     set(el) { const id = el.dataset.id, i = +el.dataset.i; const e = ensureEx(id); lock(); e.sets[i] = e.sets[i] > 0 ? 0 : defReps(id, i); if (e.sets[i] > 0) popKey = id + ':' + i; },
     rep(el) { const id = el.dataset.id, i = +el.dataset.i, d = +el.dataset.d; const e = ensureEx(id); const cur = e.sets[i] > 0 ? e.sets[i] : defReps(id, i); e.sets[i] = Math.max(1, cur + d); lock(); },
     rir(el) { ensureEx(el.dataset.id).rir = +el.dataset.v; },
@@ -236,7 +270,7 @@
     pick(el) { sheetNew = true; sheet = { type: 'food', i: +el.dataset.i, qty: 1 }; },
     qty(el) { sheet.qty = Math.max(0.25, Math.round((sheet.qty + 0.25 * +el.dataset.d) * 100) / 100); },
     close() { sheet = null; },
-    addfood() { const f = S.foods[sheet.i], q = sheet.qty; const L = log(); L.food = L.food || []; L.food.push({ name: f.name + (q !== 1 ? ' ×' + q : ''), kcal: f.kcal * q, p: f.p * q, c: f.c * q, f: f.f * q }); sheet = null; },
+    addfood() { const f = S.foods[sheet.i], q = sheet.qty; const L = log(); L.food = L.food || []; L.food.push({ name: f.name + (q !== 1 ? ' ×' + q : ''), kcal: f.kcal * q, p: f.p * q, c: f.c * q, f: f.f * q }); sheet = null; toast('Добавлено'); },
     delpreset() { S.foods.splice(sheet.i, 1); sheet = null; },
     delfood(el) { log().food.splice(+el.dataset.i, 1); },
     custom() { sheetNew = true; sheet = { type: 'custom' }; },
@@ -254,9 +288,9 @@
       if (!any || ['biceps', 'chest', 'waist', 'neck'].some((k) => !(m[k] > 0))) return;
       S.meas.push(m);
     },
-    export() { $('#io').value = JSON.stringify(S); $('#io').select(); },
+    export() { S.meta.lastExport = Date.now(); const txt = JSON.stringify(S); $('#io').value = txt; $('#io').select(); try { navigator.clipboard.writeText(txt).then(() => toast('Скопировано в буфер'), () => toast('Выделите текст и скопируйте')); } catch (e) { toast('Выделите текст и скопируйте'); } },
     import() {
-      try { const v = JSON.parse($('#io').value); if (!v || !v.logs || !v.profile) throw 0; S = Object.assign(C.defaultState(), v); S.meas = S.meas || []; }
+      try { const v = JSON.parse($('#io').value); if (!v || !v.logs || !v.profile) throw 0; S = Object.assign(C.defaultState(), v); S.meas = S.meas || []; S.meta = S.meta || {}; S.plan = S.plan || {}; toast('Данные загружены'); }
       catch (e) { $('#io').value = 'Не удалось прочитать данные'; return false; }
     },
   };

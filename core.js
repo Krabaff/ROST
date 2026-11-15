@@ -283,5 +283,60 @@
     return { days: dates.map((d) => ({ date: d, wo: workoutOf(state, d), r: computeDay(st, d) })), assumed: A };
   }
 
-  return { restFactor, workoutOf, projectWeek, windowSets, dayRaw, GROUPS, EXERCISES, PLAN, PLAN_SETS, TPLAN, defaultState, computeDay, weeklyTokens, declining, lastSets, exerciseSessions, groupSets, foodTotals, energyScore, sleepOne, sleepInfo, quality, gmax, weightOn, dstr, parse, addDays, weekday };
+  // ---------- Вес, расход калорий, калибровка ----------
+  const sum = (a) => a.reduce((x, y) => x + y, 0);
+  function slopeOf(pts) { // МНК: pts = [{x, y}] → наклон y по x
+    const n = pts.length; if (n < 2) return null;
+    const mx = sum(pts.map((p) => p.x)) / n, my = sum(pts.map((p) => p.y)) / n;
+    const den = sum(pts.map((p) => (p.x - mx) * (p.x - mx))); if (!den) return null;
+    return sum(pts.map((p) => (p.x - mx) * (p.y - my))) / den;
+  }
+  function weightSeries(state, date, days) {
+    const out = [];
+    for (let j = 0; j < days; j++) { const d = addDays(date, -(days - 1 - j)); const w = (state.logs[d] || {}).weight; if (w > 0) out.push({ x: j, y: w, d }); }
+    return out;
+  }
+  const weightTrend = (state, date) => { const W = weightSeries(state, date, 28); if (W.length < 3 || W[W.length - 1].x - W[0].x < 7) return null; const s = slopeOf(W); return s == null ? null : s * 7; }; // кг в неделю
+
+  // Расход = средние калории − (изменение веса × 7700 ккал/кг). Нужно ≥4 взвешиваний на 10+ дней и ≥7 дней питания
+  function estimateTDEE(state, date) {
+    const W = weightSeries(state, date, 28);
+    if (W.length < 4 || W[W.length - 1].x - W[0].x < 10) return null;
+    const slope = slopeOf(W); if (slope == null) return null;
+    let k = 0, cnt = 0;
+    for (let j = W[0].x; j <= W[W.length - 1].x; j++) { const ft = foodTotals(state, addDays(date, -(27 - j))); if (ft.kcal >= 1200) { k += ft.kcal; cnt++; } }
+    if (cnt < 7) return null;
+    const t = k / cnt - slope * 7700;
+    return { tdee: Math.round(Math.min(4500, Math.max(1800, t)) / 10) * 10, perWeek: slope * 7, days: cnt };
+  }
+
+  function navyBF(m, height) { const d = m.waist - m.neck; if (!(d > 0) || !(height > 0)) return null; return 495 / (1.0324 - 0.19077 * Math.log10(d) + 0.15456 * Math.log10(height)) - 450; }
+
+  // Сравнение токенов за период между первым и последним замером с изменением замеров
+  function calibration(state, date) {
+    const m = state.meas || []; if (m.length < 2) return null;
+    const a = m[0], b = m[m.length - 1];
+    const days = Math.round((parse(b.date) - parse(a.date)) / 86400000);
+    if (days < 14) return null;
+    let tok = 0; for (let i = 0; i < days; i++) tok += computeDay(state, addDays(a.date, i)).tokens;
+    const lbm = (mm) => { const bf = navyBF(mm, state.profile.height); const w = weightOn(state, mm.date) || state.profile.weight; return bf == null ? null : w * (1 - bf / 100); };
+    const l0 = lbm(a), l1 = lbm(b);
+    const dL = l0 != null && l1 != null ? l1 - l0 : null;
+    let factor = null;
+    if (days >= 84 && dL != null && tok > 50) factor = Math.max(0.5, Math.min(1.5, (dL * 1000) / tok));
+    return { days, tokensG: tok, dLbmKg: dL, dBiceps: b.biceps - a.biceps, dChest: b.chest - a.chest, dWaist: b.waist - a.waist, factor };
+  }
+
+  // Динамика повторов по упражнениям (суммарные повторы за тренировку)
+  function exerciseProgress(state) {
+    const out = [];
+    for (const id in EXERCISES) {
+      const s = exerciseSessions(state, id, '9999-12-31'); if (s.length < 2) continue;
+      const tot = s.map((x) => sum(x.sets));
+      out.push({ id, n: s.length, first: tot[0], last: tot[tot.length - 1], best: Math.max(...tot) });
+    }
+    return out;
+  }
+
+  return { slopeOf, weightTrend, estimateTDEE, navyBF, calibration, exerciseProgress, restFactor, workoutOf, projectWeek, windowSets, dayRaw, GROUPS, EXERCISES, PLAN, PLAN_SETS, TPLAN, defaultState, computeDay, weeklyTokens, declining, lastSets, exerciseSessions, groupSets, foodTotals, energyScore, sleepOne, sleepInfo, quality, gmax, weightOn, dstr, parse, addDays, weekday };
 });

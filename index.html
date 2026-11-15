@@ -106,6 +106,12 @@ button:active:not(:disabled){transform:scale(.94)}
 .pt{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
 .pw{grid-column:1/-1;color:var(--mid);font-size:12.5px;margin-top:-4px}
 #tabs button{font-size:11px}
+.chart .wl{fill:none;stroke:var(--acc);stroke-width:2.2;stroke-linejoin:round;stroke-linecap:round}
+.note.link{display:block;width:100%;text-align:left}
+.lnk{color:var(--acc);font-weight:600;text-decoration:underline;margin-left:4px}
+.note b{color:var(--tx)}
+#toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 84px);transform:translate(-50%,12px);background:#2a2d35;color:var(--tx);padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:20;white-space:nowrap}
+#toast.on{opacity:1;transform:translate(-50%,0)}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
