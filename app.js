@@ -118,7 +118,7 @@
     h += '<p class="cap">оптимальность дня · потенциал роста мышц, граммы (модельная оценка)</p>';
     if (R.missing.length) h += '<div class="note">Не внесено: ' + R.missing.map((m) => (m === 'food' ? 'питание' : 'сон')).join(', ') + '. Пока это считается как наполовину выполненное.</div>';
     if (Object.keys(S.logs).length >= 5 && (!S.meta.lastExport || Date.now() - S.meta.lastExport > 14 * 864e5)) h += '<button class="note link" data-a="tab" data-id="progress">Давно не было резервной копии данных. Откройте «Прогресс» → «Данные» → «Экспорт».</button>';
-    h += '<div class="card"><div class="row"><span>Тренировки <small>' + r1(R.setsEff) + ' из ' + r0(R.setsPlan) + ' зачётных подходов за 7 дней</small></span><b>' + r0(R.T * 100) + '%</b></div>' + bar(R.T) +
+    h += '<div class="card"><div class="row"><span>Тренировка <small>' + (planned ? esc(C.PLAN[wo].name) + ': ' + done + ' из ' + planned + ' подходов' : 'день отдыха · за неделю ' + r0(R.T * 100) + '% плана') + '</small></span><b>' + (planned ? r0(done / planned * 100) + '%' : '—') + '</b></div>' + bar(planned ? done / planned : 0) +
       '<div class="row"><span>Белок <small>' + r0(R.food.p) + ' / ' + Math.round(S.profile.proteinPerKg * S.profile.weight) + ' г</small></span><b>' + r0(R.P * 100) + '%</b></div>' + bar(R.P) +
       '<div class="row"><span>Калории <small>' + r0(R.food.kcal) + ' / ' + R.tg.kcal + ' · ' + (R.tg.train ? 'день тренировки' : 'день отдыха') + '</small></span><b>' + r0(R.E * 100) + '%</b></div>' + bar(R.E) +
       '<div class="row"><span>Углеводы <small>норма ' + R.tg.carbMin + '–' + R.tg.carbMax + ' г</small></span><b>' + r0(R.food.c) + ' г</b></div><div class="row"><span>Жиры <small>норма ' + R.tg.fatMin + '–' + R.tg.fatMax + ' г</small></span><b>' + r0(R.food.f) + ' г</b></div>' +
@@ -211,7 +211,7 @@
     if (items.length) h += '<button class="btn ghost" data-a="savetplopen">Сохранить съеденное как шаблон</button>';
     const yf = (S.logs[C.addDays(date, -1)] || {}).food;
     if (!items.length && yf && yf.length) h += '<button class="btn" data-a="copyfood">Скопировать питание со вчера (' + r0(yf.reduce((s, x) => s + x.kcal, 0)) + ' ккал)</button>';
-    h += '<h3 class="sec">Шаблоны</h3><div class="chips wrap">' + S.meals.map((m, i) => '<button class="chip" data-a="pickmeal" data-i="' + i + '">' + esc(m.name) + '</button>').join('') + '<button class="chip plusb" data-a="bcopen">Штрихкод</button><button class="chip plusb" data-a="quickopen">Быстрый ввод</button></div>';
+    h += '<h3 class="sec">Шаблоны</h3><div class="chips wrap">' + S.meals.map((m, i) => '<button class="chip" data-a="pickmeal" data-i="' + i + '">' + esc(m.name) + '</button>').join('') + '<button class="chip plusb" data-a="searchopen">Найти продукт</button><button class="chip plusb" data-a="scanopen">Скан камерой</button><button class="chip plusb" data-a="bcopen">Штрихкод</button><button class="chip plusb" data-a="quickopen">Быстрый ввод</button></div>';
     h += '<h3 class="sec">Добавить</h3><div class="chips wrap">' + S.foods.map((f, i) => '<button class="chip" data-a="pick" data-i="' + i + '">' + esc(f.name) + '</button>').join('') + '<button class="chip plusb" data-a="custom">+ своё</button></div>';
     return h;
   }
@@ -280,9 +280,15 @@
         const it = sheet.item;
         b += '<p><b>' + esc(it.name) + '</b></p><p class="mut">на 100 г: ' + r0(it.kcal) + ' ккал · Б ' + r1(it.p) + ' · У ' + r1(it.c) + ' · Ж ' + r1(it.f) + '</p><div class="chips">' + [50, 100, 150, 200, 250].map((v) => '<button class="chip s ' + (sheet.grams === v ? 'on' : '') + '" data-a="bcg" data-v="' + v + '">' + v + ' г</button>').join('') + '</div><div class="mform one"><label>Сколько съели, г<input id="b_g" inputmode="decimal" value="' + sheet.grams + '"></label></div><label class="chkl"><input type="checkbox" id="b_save" checked> Сохранить в мой список</label><button class="btn pri" data-a="bcadd">Добавить</button><button class="btn ghost" data-a="bcreset">Другой штрихкод</button>';
       } else {
-        b += '<p class="mut">Цифры под полосками на упаковке (обычно 13). Нужен интернет; найденные продукты запоминаются.</p><div class="mform one"><label>Номер<input id="b_code" inputmode="numeric" autocomplete="off" value="' + esc(sheet.code) + '" placeholder="4607025392001"></label></div>' + (sheet.msg ? '<p class="minus">' + esc(sheet.msg) + '</p>' : '') + '<button class="btn pri" data-a="bcfind" ' + (sheet.status === 'loading' ? 'disabled' : '') + '>' + (sheet.status === 'loading' ? 'Ищу…' : 'Найти') + '</button>';
+        b += '<p class="mut">Цифры под полосками на упаковке (обычно 13). Нужен интернет; найденные продукты запоминаются.</p><div class="mform one"><label>Номер<input id="b_code" inputmode="numeric" autocomplete="off" value="' + esc(sheet.code) + '" placeholder="4607025392001"></label></div>' + (sheet.msg ? '<p class="minus">' + esc(sheet.msg) + '</p>' : '') + '<button class="btn pri" data-a="bcfind" ' + (sheet.status === 'loading' ? 'disabled' : '') + '>' + (sheet.status === 'loading' ? 'Ищу…' : 'Найти') + '</button><button class="btn" data-a="scanopen">Сканировать камерой</button>';
       }
       return shade + b + '</div>';
+    }
+    if (sheet.type === 'search') {
+      return shade + '<div class="sheet"><h3>Найти продукт</h3><div class="mform one"><label>Название<input id="s_q" autocomplete="off" autocapitalize="none" enterkeyhint="search" value="' + esc(sheet.q) + '" placeholder="Например, творог 5%"></label></div><div id="s_res">' + searchHtml() + '</div><p class="mut small">Поиск идёт по базе Open Food Facts (нужен интернет) и по вашим сохранённым продуктам. Данные в базе вносят пользователи — сверяйте с упаковкой.</p></div>';
+    }
+    if (sheet.type === 'scan') {
+      return shade + '<div class="sheet"><h3>Сканер штрихкода</h3><div class="cam"><video id="cam" playsinline muted autoplay></video><div class="camframe"><i></i></div></div><p id="scanmsg" class="' + (sheet.msg ? 'minus' : 'mut') + '">' + esc(sheet.msg || 'Наведите камеру на штрихкод так, чтобы полоски занимали рамку. Держите 10–20 см, при плохом свете включите лампу.') + '</p><div class="btns"><button class="btn" data-a="bcopen">Ввести номер</button><button class="btn" data-a="close">Закрыть</button></div></div>';
     }
     if (sheet.type === 'summary') {
       const W = C.workoutSummary(S, date);
@@ -317,6 +323,9 @@
     const body = view === 'today' ? viewToday() : view === 'train' ? viewTrain() : view === 'plan' ? viewPlan() : view === 'food' ? viewFood() : viewProgress();
     $('#main').innerHTML = body;
     $('#sheetroot').innerHTML = sheetHtml();
+    if (!(sheet && sheet.type === 'scan')) { if (cam || camStarting) stopScan(); }
+    else if (cam) { const v = $('#cam'); if (v && cam.v !== v) { v.srcObject = cam.stream; v.play().catch(() => {}); cam.v = v; } }
+    else setTimeout(startScan, 0);
     document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.id === view));
     { const ind = $('#tind'), k = ['today', 'train', 'plan', 'food', 'progress'].indexOf(view); if (ind) ind.style.transform = 'translateX(' + (k * 100) + '%)'; }
     animate();
@@ -370,6 +379,105 @@
     } catch (e) { return { error: 'net' }; } finally { clearTimeout(to); }
   }
 
+  // ---------- Поиск по названию (Open Food Facts) ----------
+  function searchHtml() {
+    const q = (sheet && sheet.q || '').trim();
+    let h = '';
+    const rows = (sheet.res || []).map((x, k) => '<button class="row pick" data-a="srpick" data-k="' + k + '"><span>' + esc(x.name) + '<small>' + (x.src === 'preset' ? 'моя заготовка · ' + esc(x.unit || '') : 'на 100 г') + ': ' + r0(x.kcal) + ' ккал · Б ' + r1(x.p) + ' · У ' + r1(x.c) + ' · Ж ' + r1(x.f) + '</small></span><b>›</b></button>').join('');
+    h += rows;
+    if (q.length < 2) h += rows ? '' : '<p class="mut">Введите минимум две буквы.</p>';
+    else if (sheet.status === 'typing') h += '<p class="mut">…</p>';
+    else if (sheet.status === 'loading') h += '<p class="mut">Ищу в базе…</p>';
+    else if (sheet.status === 'error') h += '<p class="minus">Нет связи с базой или сервер занят. Повторите чуть позже.</p>';
+    else if (sheet.status === 'done' && !rows) h += '<p class="mut">Ничего не найдено. Попробуйте другое слово или внесите блюдо вручную («+ своё»).</p>';
+    return h;
+  }
+  function updSearch() { const el = $('#s_res'); if (el && sheet && sheet.type === 'search') el.innerHTML = searchHtml(); }
+  let searchT = null, searchCtl = null;
+  async function runSearch(q) {
+    const my = sheet; if (searchCtl) searchCtl.abort();
+    const local = C.searchLocal(S, q);
+    my.res = local; my.status = 'loading'; updSearch();
+    const ctl = searchCtl = new AbortController(), to = setTimeout(() => ctl.abort(), 12000);
+    try {
+      const url = 'https://world.openfoodfacts.org/cgi/search.pl?search_simple=1&action=process&json=1&page_size=25&sort_by=unique_scans_n&fields=code,product_name,brands,nutriments&search_terms=' + encodeURIComponent(q);
+      const r = await fetch(url, { signal: ctl.signal });
+      if (!r.ok) throw new Error('http');
+      const list = C.parseOFFList(await r.json());
+      if (sheet !== my || (my.q || '').trim() !== q) return;
+      const have = new Set(local.map((x) => x.name.toLowerCase()));
+      my.res = local.concat(list.filter((x) => !have.has(x.name.toLowerCase())).map((x) => Object.assign({ src: 'off', item: x }, x))).slice(0, 30);
+      my.status = 'done';
+    } catch (e) { if (sheet !== my || (my.q || '').trim() !== q) return; my.status = local.length ? 'done' : 'error'; } finally { clearTimeout(to); }
+    updSearch();
+  }
+  document.addEventListener('input', (ev) => {
+    if (ev.target.id !== 's_q' || !sheet || sheet.type !== 'search') return;
+    sheet.q = ev.target.value; clearTimeout(searchT);
+    const q = sheet.q.trim();
+    if (q.length < 2) { sheet.status = 'idle'; sheet.res = []; updSearch(); return; }
+    sheet.res = C.searchLocal(S, q); sheet.status = 'typing'; updSearch();
+    searchT = setTimeout(() => runSearch(q), 650);
+  });
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && ev.target.id === 's_q' && sheet && sheet.type === 'search') { ev.preventDefault(); const q = sheet.q.trim(); if (q.length >= 2) { clearTimeout(searchT); runSearch(q); } ev.target.blur(); } });
+
+  // ---------- Камера: штрихкод ----------
+  let cam = null, camStarting = false;
+  function stopScan() {
+    if (cam) { clearInterval(cam.timer); try { cam.stream.getTracks().forEach((t) => t.stop()); } catch (e) { /* уже остановлено */ } if (cam.v) cam.v.srcObject = null; cam = null; }
+    camStarting = false;
+  }
+  function scanMsg(t) { if (sheet && sheet.type === 'scan') sheet.msg = t; const el = $('#scanmsg'); if (el) { el.textContent = t; el.className = 'minus'; } }
+  async function startScan() {
+    const v = $('#cam'); if (!v || camStarting || cam) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { scanMsg('Камера недоступна в этом режиме. Введите номер вручную.'); return; }
+    camStarting = true;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+      if (!sheet || sheet.type !== 'scan') { stream.getTracks().forEach((t) => t.stop()); camStarting = false; return; }
+      const el = $('#cam') || v; el.srcObject = stream; await el.play().catch(() => {});
+      let det = null; try { if (window.BarcodeDetector) det = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a'] }); } catch (e) { det = null; }
+      cam = { stream, v: el, det, last: '', busy: false, canvas: document.createElement('canvas'), timer: null };
+      cam.timer = setInterval(scanTick, 170);
+    } catch (e) {
+      scanMsg(e && /denied|permission|NotAllowed/i.test(e.name + e.message) ? 'Нет доступа к камере. Разрешите её для сайта в настройках iPhone (Safari → Камера) или введите номер вручную.' : 'Не удалось включить камеру. Введите номер вручную.');
+    }
+    camStarting = false;
+  }
+  async function scanTick() {
+    if (!cam || cam.busy || !sheet || sheet.type !== 'scan') return;
+    const v = cam.v; if (!v || v.readyState < 2 || !v.videoWidth) return;
+    cam.busy = true;
+    try {
+      let code = null;
+      if (cam.det) { try { const r = await cam.det.detect(v); if (r && r[0]) code = String(r[0].rawValue || ''); } catch (e) { cam.det = null; } }
+      if (!code && window.Scan) {
+        const vw = v.videoWidth, vh = v.videoHeight, W = Math.min(vw, 1280), k = W / vw, sy = vh * 0.25, sh = vh * 0.5, H = Math.max(8, Math.round(sh * k));
+        const cv = cam.canvas; cv.width = W; cv.height = H;
+        const cx = cv.getContext('2d', { willReadFrequently: true }); cx.drawImage(v, 0, sy, vw, sh, 0, 0, W, H);
+        code = window.Scan.decodeRGBA(cx.getImageData(0, 0, W, H).data, W, H);
+      }
+      if (code && C.validBarcode(code)) {
+        if (cam.last === code) { stopScan(); haptic(); foundCode(code); return; }
+        cam.last = code;
+      } else if (!code) cam.last = '';
+    } finally { if (cam) cam.busy = false; }
+  }
+  function foundCode(code) { sheet = { type: 'barcode', code, status: 'idle', grams: 100, msg: '' }; sheetNew = true; findCode(code); render(); }
+  function findCode(code) {
+    sheet.code = code;
+    if (!C.validBarcode(code)) { sheet.msg = code.length ? 'Номер не похож на штрихкод: проверьте цифры (контрольная цифра не сходится).' : 'Введите номер штрихкода.'; return; }
+    if (S.barcodes[code]) { sheet.item = S.barcodes[code]; sheet.status = 'found'; sheet.msg = ''; return; }
+    sheet.status = 'loading'; sheet.msg = '';
+    const my = sheet;
+    lookup(code).then((res) => {
+      if (sheet !== my) return;
+      if (res.error) { my.status = 'idle'; my.msg = { notfound: 'Продукта нет в базе Open Food Facts. Найдите его по названию или внесите вручную через «+ своё».', nonutri: 'В базе нет данных о калориях этого продукта. Внесите вручную.', net: 'Нет связи с базой. Проверьте интернет и повторите.' }[res.error]; }
+      else { S.barcodes[code] = res; save(); my.item = res; my.status = 'found'; }
+      render();
+    });
+  }
+
   // ---------- Таймер отдыха ----------
   let timer = null, audio = null, beeped = false;
   function startTimer(sec) {
@@ -406,20 +514,16 @@
     bcopen() { sheetNew = true; sheet = { type: 'barcode', code: '', status: 'idle', grams: 100, msg: '' }; },
     bcreset() { sheet.status = 'idle'; sheet.item = null; sheet.code = ''; sheet.msg = ''; },
     bcg(el) { sheet.grams = +el.dataset.v; },
-    bcfind() {
-      const code = (($('#b_code').value) || '').replace(/\D/g, '');
-      sheet.code = code;
-      if (!C.validBarcode(code)) { sheet.msg = code.length ? 'Номер не похож на штрихкод: проверьте цифры (контрольная цифра не сходится).' : 'Введите номер штрихкода.'; return; }
-      if (S.barcodes[code]) { sheet.item = S.barcodes[code]; sheet.status = 'found'; sheet.msg = ''; return; }
-      sheet.status = 'loading'; sheet.msg = '';
-      const my = sheet;
-      lookup(code).then((res) => {
-        if (sheet !== my) return;
-        if (res.error) { my.status = 'idle'; my.msg = { notfound: 'Продукта нет в базе Open Food Facts. Внесите его вручную через «+ своё».', nonutri: 'В базе нет данных о калориях этого продукта. Внесите вручную.', net: 'Нет связи с базой. Проверьте интернет и повторите.' }[res.error]; }
-        else { S.barcodes[code] = res; save(); my.item = res; my.status = 'found'; }
-        render();
-      });
+    bcfind() { const code = (($('#b_code').value) || '').replace(/\D/g, ''); findCode(code); },
+    searchopen() { sheetNew = true; sheet = { type: 'search', q: '', status: 'idle', res: [] }; setTimeout(() => { const el = $('#s_q'); if (el) el.focus(); }, 320); },
+    srpick(el) {
+      const x = sheet.res[+el.dataset.k]; if (!x) return false;
+      sheetNew = true;
+      if (x.src === 'preset') { sheet = { type: 'food', i: x.i, qty: 1 }; return; }
+      const it = x.item; if (it.code) { S.barcodes[it.code] = { name: it.name, kcal: it.kcal, p: it.p, c: it.c, f: it.f }; }
+      sheet = { type: 'barcode', code: it.code || '', status: 'found', item: it, grams: 100, msg: '' };
     },
+    scanopen() { sheetNew = true; sheet = { type: 'scan', msg: '' }; },
     bcadd() {
       const g = num('#b_g'); if (!(g > 0)) return false;
       const it = sheet.item, k = g / 100, L = log(); L.food = L.food || [];
@@ -454,7 +558,7 @@
     weight(el) { const L = log(); const base = L.weight > 0 ? L.weight : (C.weightOn(S, date) || S.profile.weight); L.weight = Math.round((L.weight > 0 ? base + 0.1 * +el.dataset.d : base) * 10) / 10; },
     pick(el) { sheetNew = true; sheet = { type: 'food', i: +el.dataset.i, qty: 1 }; },
     qty(el) { sheet.qty = Math.max(0.25, Math.round((sheet.qty + 0.25 * +el.dataset.d) * 100) / 100); },
-    close() { sheet = null; },
+    close() { sheet = null; stopScan(); },
     addfood() { const f = S.foods[sheet.i], q = sheet.qty; const L = log(); L.food = L.food || []; L.food.push({ name: f.name + (q !== 1 ? ' ×' + q : ''), kcal: f.kcal * q, p: f.p * q, c: f.c * q, f: f.f * q }); sheet = null; toast('Добавлено'); },
     delpreset() { S.foods.splice(sheet.i, 1); sheet = null; },
     delfood(el) { log().food.splice(+el.dataset.i, 1); },
@@ -547,21 +651,6 @@
     const go = (Math.abs(dx) > 80 || (Math.abs(dx) > 40 && vel > 0.5)) && goTab(TABS.indexOf(view) + (dx < 0 ? 1 : -1), dx < 0 ? 1 : -1);
     if (!go) { m.style.transition = 'transform .35s cubic-bezier(.22,.9,.3,1),opacity .3s'; m.style.transform = ''; m.style.opacity = ''; }
   }, { passive: true });
-
-  // Свайп по нижней панели: палец скользит по вкладкам, активная следует за ним
-  let tb = null, tbDrag = false;
-  const tabAt = (x) => { const r = $('#tabs').getBoundingClientRect(); return Math.max(0, Math.min(TABS.length - 1, Math.floor(((x - r.left) / r.width) * TABS.length))); };
-  document.addEventListener('touchstart', (ev) => { tb = ev.target.closest('#tabs') ? { x: ev.touches[0].clientX, moved: false } : null; tbDrag = false; }, { passive: true });
-  document.addEventListener('touchmove', (ev) => {
-    if (!tb) return;
-    const x = ev.touches[0].clientX;
-    if (!tb.moved && Math.abs(x - tb.x) < 12) return;
-    tb.moved = true; tbDrag = true;
-    const i = tabAt(x), cur = TABS.indexOf(view);
-    if (i !== cur) { if (goTab(i, i > cur ? 1 : -1)) haptic(); }
-  }, { passive: true });
-  document.addEventListener('touchend', () => { tb = null; if (tbDrag) setTimeout(() => { tbDrag = false; }, 350); }, { passive: true });
-  document.addEventListener('click', (ev) => { if (tbDrag && ev.target.closest('#tabs')) { ev.stopPropagation(); ev.preventDefault(); } }, true);
 
   // Круговая «рябь» от касания (после перерисовки восстанавливается на новом элементе)
   let lastRip = null;

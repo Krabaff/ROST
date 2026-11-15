@@ -160,6 +160,12 @@ small.up{color:var(--acc)}small.dn{color:var(--low)}
 #tabs button:active:not(:disabled){transform:none}#tabs button:active svg{transform:scale(.88)}#tabs button{-webkit-tap-highlight-color:transparent}
 @keyframes swl{from{opacity:.4;transform:translateX(28px)}to{opacity:1;transform:none}}
 @keyframes swr{from{opacity:.4;transform:translateX(-28px)}to{opacity:1;transform:none}}
+.cam{position:relative;border-radius:16px;overflow:hidden;background:#000;aspect-ratio:4/3;margin:10px 0}
+.cam video{width:100%;height:100%;object-fit:cover;display:block}
+.camframe{position:absolute;left:8%;right:8%;top:28%;bottom:28%;border:2px solid var(--acc);border-radius:14px;box-shadow:0 0 0 999px rgba(0,0,0,.38);overflow:hidden}
+.camframe i{position:absolute;left:0;right:0;height:2px;background:var(--acc);box-shadow:0 0 12px var(--acc);animation:scanline 1.8s ease-in-out infinite alternate}
+@keyframes scanline{from{top:6%}to{top:94%}}
+.row.pick{width:100%;text-align:left;border-radius:12px}.row.pick:active{background:var(--card2)}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.rip{display:none}}
 </style>
 </head>
@@ -175,6 +181,7 @@ small.up{color:var(--acc)}small.dn{color:var(--low)}
   <button data-a="tab" data-id="progress"><svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 15l4-4 3 3 5-6"/></svg>Прогресс</button>
 </nav>
 <script src="core.js"></script>
+<script src="scan.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

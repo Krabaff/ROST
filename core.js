@@ -547,16 +547,39 @@
     return (10 - (s % 10)) % 10 === chk;
   }
   // Ответ Open Food Facts → продукт на 100 г
-  function parseOFF(j) {
-    if (!j || j.status !== 1 || !j.product) return { error: 'notfound' };
-    const n = j.product.nutriments || {};
+  function offItem(pr, code) {
+    const n = pr.nutriments || {};
     let kcal = Number(n['energy-kcal_100g']);
     if (!(kcal >= 0) || n['energy-kcal_100g'] == null || n['energy-kcal_100g'] === '') { const kj = Number(n['energy_100g']); kcal = n['energy_100g'] != null && kj >= 0 ? kj / 4.184 : NaN; }
-    if (!(kcal >= 0)) return { error: 'nonutri' };
-    const name = [j.product.product_name, j.product.brands].filter(Boolean).join(' · ').slice(0, 60) || 'Продукт ' + (j.code || '');
+    if (!(kcal >= 0)) return null;
+    const name = [pr.product_name, pr.brands].filter(Boolean).join(' · ').slice(0, 60) || 'Продукт ' + (code || '');
     const num = (v) => (Number(v) >= 0 ? Number(v) : 0);
     return { name, kcal, p: num(n.proteins_100g), c: num(n.carbohydrates_100g), f: num(n.fat_100g) };
   }
+  function parseOFF(j) {
+    if (!j || j.status !== 1 || !j.product) return { error: 'notfound' };
+    return offItem(j.product, j.code) || { error: 'nonutri' };
+  }
+  // Результат текстового поиска Open Food Facts → список продуктов на 100 г (без дублей и без пустых данных)
+  function parseOFFList(j) {
+    const out = [], seen = new Set();
+    for (const pr of (j && Array.isArray(j.products) ? j.products : [])) {
+      if (!pr || !pr.product_name) continue;
+      const it = offItem(pr, pr.code); if (!it) continue;
+      const key = it.name.toLowerCase() + '|' + Math.round(it.kcal); if (seen.has(key)) continue; seen.add(key);
+      if (pr.code && validBarcode(String(pr.code))) it.code = String(pr.code);
+      out.push(it);
+    }
+    return out;
+  }
+  // Локальный поиск: сохранённые по штрихкоду продукты и свои заготовки
+  function searchLocal(state, q) {
+    const t = String(q || '').trim().toLowerCase(); if (t.length < 2) return [];
+    const out = [];
+    state.foods.forEach((f, i) => { if (f.name.toLowerCase().includes(t)) out.push({ src: 'preset', i, name: f.name, kcal: f.kcal, p: f.p, c: f.c, f: f.f, unit: f.unit }); });
+    for (const code in state.barcodes || {}) { const it = state.barcodes[code]; if (it.name.toLowerCase().includes(t)) out.push({ src: 'saved', item: Object.assign({ code }, it), name: it.name, kcal: it.kcal, p: it.p, c: it.c, f: it.f }); }
+    return out.slice(0, 8);
+  }
 
-  return { targets, dayTDEE, nextWorkout, trainingDay, validBarcode, parseOFF, deloadOn, setsFor, deloadSuggested, restIdeal, painAdvice, catchup, weeklyReview, sleepVsPerformance, WARMUP, COOLDOWN, MOBILITY, PAIN, defaultMeals, slopeOf, weightTrend, estimateTDEE, navyBF, calibration, exerciseProgress, workoutSummary, restFactor, workoutOf, projectWeek, windowSets, dayRaw, GROUPS, EXERCISES, PLAN, PLAN_SETS, TPLAN, defaultState, computeDay, weeklyTokens, declining, lastSets, exerciseSessions, groupSets, foodTotals, energyScore, sleepOne, sleepInfo, quality, gmax, weightOn, dstr, parse, addDays, weekday };
+  return { parseOFFList, searchLocal, targets, dayTDEE, nextWorkout, trainingDay, validBarcode, parseOFF, deloadOn, setsFor, deloadSuggested, restIdeal, painAdvice, catchup, weeklyReview, sleepVsPerformance, WARMUP, COOLDOWN, MOBILITY, PAIN, defaultMeals, slopeOf, weightTrend, estimateTDEE, navyBF, calibration, exerciseProgress, workoutSummary, restFactor, workoutOf, projectWeek, windowSets, dayRaw, GROUPS, EXERCISES, PLAN, PLAN_SETS, TPLAN, defaultState, computeDay, weeklyTokens, declining, lastSets, exerciseSessions, groupSets, foodTotals, energyScore, sleepOne, sleepInfo, quality, gmax, weightOn, dstr, parse, addDays, weekday };
 });
