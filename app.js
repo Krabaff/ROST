@@ -513,6 +513,24 @@
     if (a === 'tab') window.scrollTo(0, scrollY[view] || 0);
   });
 
+
+  // Свайп влево/вправо — соседняя вкладка (не срабатывает на прокручиваемых рядах, полях и в шторке)
+  const TABS = ['today', 'train', 'plan', 'food', 'progress'];
+  let sw = null;
+  document.addEventListener('touchstart', (ev) => {
+    const t = ev.touches[0];
+    sw = ev.touches.length === 1 && !sheet && !ev.target.closest('.chips,.seg,input,textarea,.sheet,#timer,#toast,.heat') ? { x: t.clientX, y: t.clientY, t: Date.now() } : null;
+  }, { passive: true });
+  document.addEventListener('touchend', (ev) => {
+    if (!sw) return;
+    const t = ev.changedTouches[0], dx = t.clientX - sw.x, dy = t.clientY - sw.y, dt = Date.now() - sw.t; sw = null;
+    if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.8 || dt > 700) return;
+    const i = TABS.indexOf(view) + (dx < 0 ? 1 : -1);
+    if (i < 0 || i >= TABS.length) return;
+    scrollY[view] = window.scrollY; view = TABS[i]; render(); window.scrollTo(0, scrollY[view] || 0);
+    const m = $('#main'); m.classList.remove('swl', 'swr'); void m.offsetWidth; m.classList.add(dx < 0 ? 'swl' : 'swr');
+  }, { passive: true });
+
   // Круговая «рябь» от касания (после перерисовки восстанавливается на новом элементе)
   let lastRip = null;
   function addRip(el, x, y, elapsed) {

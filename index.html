@@ -151,6 +151,14 @@ button:active:not(:disabled){transform:scale(.93);transition-duration:.07s}
 .pr{font-style:normal;color:var(--acc);font-weight:600}
 small.up{color:var(--acc)}small.dn{color:var(--low)}
 .sheet .btn.pri{margin-top:14px}
+/* Переключатели без обрезки по краям + свайп */
+.chips{margin-left:-16px;margin-right:-16px;padding:2px 16px;scroll-padding:0 16px;-webkit-overflow-scrolling:touch;scrollbar-width:none;overscroll-behavior-x:contain}
+.chips::-webkit-scrollbar{display:none}
+.chips.wrap{margin-left:0;margin-right:0;padding:0}
+#main{touch-action:pan-y pinch-zoom}
+#main.swl{animation:swl .28s cubic-bezier(.2,.8,.2,1)}#main.swr{animation:swr .28s cubic-bezier(.2,.8,.2,1)}
+@keyframes swl{from{opacity:.4;transform:translateX(28px)}to{opacity:1;transform:none}}
+@keyframes swr{from{opacity:.4;transform:translateX(-28px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.rip{display:none}}
 </style>
 </head>

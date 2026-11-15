@@ -291,7 +291,26 @@
     // Что ограничивает прирост
     const lim = [];
     const gain = (T2, P2, E2, S2) => Gmax * T2 * Math.pow(P2, 0.4) * Math.pow(E2, 0.3) * Math.pow(S2, 0.3) - M;
-    if (T < 0.999 && tg.train) lim.push({ key: 'train', gain: gain(1, P, E, S), text: 'Выполнить план тренировок полностью' });
+    if (tg.train) {
+      // Только то, что ещё можно сделать сегодня: недостающие подходы дня, а не вся неделя
+      const wo = workoutOf(state, date), L0 = getLog(state, date);
+      if (wo && PLAN[wo]) {
+        const ex2 = {}; let left = 0;
+        for (const id of PLAN[wo].ex) {
+          const n = setsFor(state, date, id), e = (L0.ex && L0.ex[id]) || { rir: 2, sets: [] };
+          const sets = []; for (let i = 0; i < n; i++) { const v = (e.sets && e.sets[i]) || 0; if (!(v > 0)) left++; sets.push(v > 0 ? v : EXERCISES[id].reps[0]); }
+          ex2[id] = Object.assign({}, e, { sets, rir: e.rir == null ? 2 : e.rir });
+        }
+        if (left > 0) {
+          const st2 = Object.assign({}, state, { logs: Object.assign({}, state.logs, { [date]: Object.assign({}, L0, { ex: ex2 }) }) });
+          const W2 = windowSets(st2, date);
+          let a = 0, b = 0; for (const g in GROUPS) { a += GROUPS[g].w * W2.sets[g]; b += GROUPS[g].w * W2.noRec[g]; }
+          const T2 = Math.min(1, rawT(W2.noRec) / TPLAN) * (b > 0 ? a / b : 1);
+          const g2 = gain(T2, P, E, S);
+          if (g2 > 0.05) lim.push({ key: 'train', gain: g2, text: 'Доделать тренировку: осталось ' + left + ' ' + (left % 10 === 1 && left !== 11 ? 'подход' : left % 10 >= 2 && left % 10 <= 4 && (left < 12 || left > 14) ? 'подхода' : 'подходов') });
+        }
+      }
+    }
     if (P < 0.999) lim.push({ key: 'protein', gain: gain(T, 1, E, S), text: ft.n ? 'Добрать белок до ' + Math.round(pr.proteinPerKg * pr.weight) + ' г' : 'Внести питание за день' });
     if (Eraw < 0.999) lim.push({ key: 'energy', gain: gain(T, P, comp, S), text: ft.n ? (surplus < 0.05 ? 'Добавить калории: цель на сегодня около ' + tg.kcal + ' ккал' : 'Профицит великоват — часть уйдёт в жир') : 'Внести питание за день' });
     if (comp < 0.999) lim.push({ key: 'macro', gain: gain(T, P, Eraw, S), text: ft.c < tg.carbMin ? 'Добрать углеводы до ' + tg.carbMin + ' г' : 'Жиры: не меньше ' + tg.fatMin + ' г' });
