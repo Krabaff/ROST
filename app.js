@@ -19,7 +19,7 @@
     const def = C.defaultState();
     if (!st) { def.meas = []; return def; }
     st.profile = Object.assign({}, def.profile, st.profile);
-    st.logs = st.logs || {}; st.foods = st.foods || def.foods; st.schedule = st.schedule || def.schedule; st.meas = st.meas || [];
+    st.logs = st.logs || {}; st.foods = st.foods || def.foods; st.schedule = st.schedule || def.schedule; st.meas = st.meas || []; st.plan = st.plan || {};
     return st;
   }
   let S = load();
@@ -27,11 +27,14 @@
 
   let view = 'today';
   let date = C.dstr(new Date());
-  const TODAY = date;
-  let sheet = null; // {type:'food'|'custom', food, qty}
+  let TODAY = date;
+  const scrollY = {};
+  let sheet = null;
+  let enter = true, popKey = null, sheetNew = false;
+  const prev = {}; // {type:'food'|'custom', food, qty}
 
   const log = () => (S.logs[date] = S.logs[date] || {});
-  const workoutOf = (d) => { const l = S.logs[d]; if (l && l.workout !== undefined) return l.workout; return S.schedule[C.weekday(d)] || ''; };
+  const workoutOf = (d) => C.workoutOf(S, d);
   const fmtDate = (d) => { const x = C.parse(d); return DAYS[x.getDay()] + ', ' + x.getDate() + ' ' + MONTHS[x.getMonth()]; };
 
   // ---------- Мелкие компоненты ----------
@@ -55,10 +58,11 @@
     h += '<div class="ringwrap"><svg viewBox="0 0 180 180" class="ring"><circle cx="90" cy="90" r="' + R_ + '" class="rbg"/><circle cx="90" cy="90" r="' + R_ + '" class="rfg ' + col + '" stroke-dasharray="' + circ + '" stroke-dashoffset="' + (circ * (1 - pct / 100)) + '" transform="rotate(-90 90 90)"/></svg><div class="ringtxt"><div class="big">' + r0(R.opt) + '<small>%</small></div><div class="tok">' + (R.tokens >= 0 ? '+' : '−') + r1(Math.abs(R.tokens)) + ' г</div></div></div>';
     h += '<p class="cap">оптимальность дня · потенциал роста мышц, граммы (модельная оценка)</p>';
     if (R.missing.length) h += '<div class="note">Не внесено: ' + R.missing.map((m) => (m === 'food' ? 'питание' : 'сон')).join(', ') + '. Пока это считается как наполовину выполненное.</div>';
-    h += '<div class="card"><div class="row"><span>Тренировки (7 дней)</span><b>' + r0(R.T * 100) + '%</b></div>' + bar(R.T) +
-      '<div class="row"><span>Белок</span><b>' + r0(R.P * 100) + '%</b></div>' + bar(R.P) +
-      '<div class="row"><span>Калории</span><b>' + r0(R.E * 100) + '%</b></div>' + bar(R.E) +
-      '<div class="row"><span>Сон</span><b>' + r0(R.S * 100) + '%</b></div>' + bar(R.S) + '</div>';
+    h += '<div class="card"><div class="row"><span>Тренировки <small>' + r1(R.setsEff) + ' из ' + r0(R.setsPlan) + ' зачётных подходов за 7 дней</small></span><b>' + r0(R.T * 100) + '%</b></div>' + bar(R.T) +
+      '<div class="row"><span>Белок <small>' + r0(R.food.p) + ' / ' + Math.round(S.profile.proteinPerKg * S.profile.weight) + ' г</small></span><b>' + r0(R.P * 100) + '%</b></div>' + bar(R.P) +
+      '<div class="row"><span>Калории <small>' + r0(R.food.kcal) + ' / ' + Math.round(S.profile.tdee * 1.08) + '</small></span><b>' + r0(R.E * 100) + '%</b></div>' + bar(R.E) +
+      '<div class="row"><span>Сон <small>' + (R.sleep.last ? r1(R.sleep.last) + ' ч ночью · ' : '') + (R.sleep.mean ? 'среднее ' + r1(R.sleep.mean) + ' ч за неделю' : 'не внесён') + '</small></span><b>' + r0(R.S * 100) + '%</b></div>' + bar(R.S) +
+      (R.R < 0.98 ? '<div class="row"><span>Восстановление <small>тренировки идут слишком плотно</small></span><b>' + r0(R.R * 100) + '%</b></div>' + bar(R.R) : '') + '</div>';
     if (wo && C.PLAN[wo]) h += '<button class="card link" data-a="tab" data-id="train"><div class="row"><span>' + esc(C.PLAN[wo].name) + '</span><b>' + done + ' / ' + planned + '</b></div>' + bar(planned ? done / planned : 0) + '</button>';
     else h += '<div class="card"><div class="row"><span>День отдыха</span><b>восстановление</b></div></div>';
     if (R.limiters.length) h += '<div class="card"><h3>Что добавит больше всего</h3>' + R.limiters.slice(0, 3).map((l) => '<div class="row lim"><span>' + esc(l.text) + '</span><b class="plus">+' + r1(l.gain) + ' г</b></div>').join('') + '</div>';
@@ -81,7 +85,7 @@
       const e = L[id] || { rir: 2, sets: [] };
       const last = C.lastSets(S, id, date);
       const doneN = (e.sets || []).filter((x) => x > 0).length;
-      h += '<div class="card ex ' + (doneN === ex.sets ? 'full' : '') + '"><div class="exh"><b>' + esc(ex.name) + '</b><span>' + ex.sets + '×' + ex.reps[0] + '–' + ex.reps[1] + '</span></div><p class="mut">' + esc(ex.tip) + (last ? ' · прошлый раз: ' + last.sets.join(', ') : '') + '</p>';
+      h += '<div class="card ex ' + (doneN === ex.sets ? 'full' : '') + '"><div class="exh"><b>' + esc(ex.name) + '</b><button class="allb ' + (doneN === ex.sets ? 'on' : '') + '" data-a="all" data-id="' + id + '">' + (doneN === ex.sets ? '✓ Готово' : 'Отметить все') + '</button></div><p class="mut"><span class="tgt">' + ex.sets + '×' + ex.reps[0] + '–' + ex.reps[1] + '</span> · ' + esc(ex.tip) + (last ? ' · прошлый раз: ' + last.sets.join(', ') : '') + '</p>';
       for (let i = 0; i < ex.sets; i++) {
         const v = (e.sets && e.sets[i]) || 0;
         const sug = v || (last && last.sets[i]) || ex.reps[0];
@@ -89,9 +93,33 @@
           '<div class="step ' + (v > 0 ? '' : 'dim') + '"><button data-a="rep" data-id="' + id + '" data-i="' + i + '" data-d="-1">−</button><b>' + sug + '</b><button data-a="rep" data-id="' + id + '" data-i="' + i + '" data-d="1">+</button></div></div>';
       }
       const rir = e.rir == null ? 2 : e.rir;
-      h += '<div class="rir"><span>Запас повторов</span>' + [[1, '0–1'], [2, '2'], [3, '3'], [4, '4–5'], [6, '6+']].map(([v, t]) => '<button class="chip s ' + (rir === v ? 'on' : '') + '" data-a="rir" data-id="' + id + '" data-v="' + v + '">' + t + '</button>').join('') + '</div></div>';
+      const rs = e.rest || 0, rf = C.restFactor(id, rs);
+      const restRow = '<div class="rir n"><span>Отдых, мин</span>' + [[45, '≤1'], [75, '1–1,5'], [105, '1,5–2'], [150, '2–3'], [210, '3+']].map(([v, t]) => '<button class="chip s ' + (rs === v ? 'on' : '') + '" data-a="rest" data-id="' + id + '" data-v="' + v + '">' + t + '</button>').join('') + (rs && rf < 0.995 ? '<span class="small minus">зачёт −' + r0((1 - rf) * 100) + '%</span>' : '') + '</div>';
+      h += '<div class="rir"><span>Запас повторов</span>' + [[1, '0–1'], [2, '2'], [3, '3'], [4, '4–5'], [6, '6+']].map(([v, t]) => '<button class="chip s ' + (rir === v ? 'on' : '') + '" data-a="rir" data-id="' + id + '" data-v="' + v + '">' + t + '</button>').join('') + '</div>' + restRow + '</div>';
     }
-    h += '<p class="mut small">Запас повторов — сколько ещё повторов вы могли бы сделать. Подходы с запасом 0–3 считаются полностью, 4–5 — вполовину, 6+ — не считаются: они слишком далеки от отказа для роста.</p>';
+    h += '<p class="mut small">Запас повторов — сколько ещё повторов вы могли бы сделать. Подходы с запасом 0–3 считаются полностью, 4–5 — вполовину, 6+ — не считаются: они слишком далеки от отказа для роста. Отдых: для подтягиваний и брусьев лучше 2–3 минуты, для упражнений с резинкой хватает минуты; при меньшем отдыхе подходы засчитываются с небольшой скидкой.</p>';
+    return h;
+  }
+
+  // ---------- Экран: План недели ----------
+  function viewPlan() {
+    const P = C.projectWeek(S, TODAY, 7);
+    const B = C.projectWeek(Object.assign({}, S, { plan: {} }), TODAY, 7);
+    const sum = (X) => X.days.reduce((s, x) => s + x.r.tokens, 0);
+    const tot = sum(P), diff = tot - sum(B);
+    const sess = P.days.filter((x) => x.wo && C.PLAN[x.wo]).length;
+    const A = P.assumed;
+    let h = '<h2>План недели</h2><div class="card"><h3>Прогноз на 7 дней</h3><div class="row"><span>Токены</span><b>' + r1(tot) + ' г</b></div><div class="row"><span>К базовому плану (пн · ср · пт)</span><b class="' + (diff >= -0.05 ? 'plus' : 'minus') + '">' + (diff >= 0 ? '+' : '−') + r1(Math.abs(diff)) + ' г</b></div><div class="row"><span>Тренировок в неделю</span><b>' + sess + '</b></div></div>';
+    h += '<div class="card"><h3>Выберите тип дня</h3>' + P.days.map((x) => {
+      const dt = C.parse(x.date), tk = x.r.tokens;
+      return '<div class="prow"><div class="pd"><b>' + (x.date === TODAY ? 'Сегодня' : DAYS[dt.getDay()]) + '</b><span>' + dt.getDate() + ' ' + MONTHS[dt.getMonth()] + '</span></div><div class="seg">' + ['A', 'B', 'C', ''].map((k) => '<button class="chip s ' + (x.wo === k ? 'on' : '') + '" data-a="plan" data-id="' + x.date + '" data-v="' + k + '">' + (k || 'Отдых') + '</button>').join('') + '</div><div class="pt ' + (tk >= 0 ? 'plus' : 'minus') + '">' + (tk >= 0 ? '+' : '−') + r1(Math.abs(tk)) + '</div>' + (x.wo && C.PLAN[x.wo] && x.r.R < 0.95 ? '<div class="pw">Мало отдыха между тренировками: −' + r0((1 - x.r.R) * 100) + '% к зачёту</div>' : '') + '</div>';
+    }).join('') + '<p class="mut small">Число справа — токены этого дня (г). Тренировка влияет на токены следующих 7 дней, поэтому день отдыха после неё тоже «зарабатывает».</p></div>';
+    const tips = [];
+    if (sess < 3) tips.push('Меньше трёх тренировок в неделю — объём ниже плана, прирост падает.');
+    if (sess > 4) tips.push('Больше четырёх тренировок на тот же набор мышц не добавят роста, зато снижают восстановление.');
+    if (P.days.some((x) => x.r.R < 0.95)) tips.push('Тренировки подряд на одни и те же мышцы засчитываются хуже: разнесите их на 48 часов.');
+    if (tips.length) h += '<div class="card warn"><h3>Совет</h3>' + tips.map((x) => '<p>' + x + '</p>').join('') + '</div>';
+    h += '<p class="mut small">Допущения прогноза: подходы выполнены полностью с запасом 2 повтора; питание ≈ ' + r0(A.kcal) + ' ккал и ' + r0(A.p) + ' г белка, сон ≈ ' + r1(A.sleep) + ' ч (' + (A.hasFood && A.hasSleep ? 'ваше среднее за неделю' : 'ориентир, пока мало данных') + '). Уже внесённые подходы учитываются как есть.</p>';
     return h;
   }
 
@@ -138,7 +166,7 @@
 
     const pr = S.profile;
     h += '<div class="card"><h3>Профиль</h3>' + [['weight', 'Вес, кг', pr.weight], ['tdee', 'Расход калорий, ккал', pr.tdee], ['level', 'Потенциал, % массы в месяц', pr.level], ['proteinPerKg', 'Белок, г на кг', pr.proteinPerKg]].map(([k, n, v]) => '<label class="pf">' + n + '<input data-prof="' + k + '" inputmode="decimal" value="' + v + '"></label>').join('') + '<p class="mut small">Расход калорий (TDEE) подберите по динамике веса: если вес за 2–3 недели не меняется при вашем питании, это и есть ваш расход.</p></div>';
-    h += '<div class="card"><h3>Как читать токены</h3><p class="mut">Токен = условный грамм мышечной массы в день при вашем уровне. 100% — план выполнен полностью, белок и калории в норме, сон от 7,5 ч. Модель опирается на данные об объёме тренинга, белке, энергетическом балансе и сне, но это оценка, а не измерение. Через 8–12 недель сравните сумму токенов с реальной динамикой замеров и подправьте «Потенциал» в профиле.</p></div>';
+    h += '<div class="card"><h3>Как читать токены</h3><p class="mut">Токен = условный грамм мышечной массы в день при вашем уровне. 100% — план выполнен полностью, белок и калории в норме, сон от 7,5 ч. Модель учитывает объём тренинга (с поправками на запас повторов, отдых между подходами, убывающую отдачу и восстановление между тренировками), белок, энергетический баланс и сон, но это оценка, а не измерение. Через 8–12 недель сравните сумму токенов с реальной динамикой замеров и подправьте «Потенциал» в профиле.</p></div>';
     h += '<div class="card"><h3>Данные</h3><div class="btns"><button class="btn" data-a="export">Экспорт</button><button class="btn" data-a="import">Импорт</button></div><p class="mut small">Данные хранятся только в браузере этого телефона. Делайте экспорт раз в пару недель.</p><textarea id="io" class="io" placeholder="Сюда попадёт копия данных или вставьте её для импорта"></textarea></div>';
     return h;
   }
@@ -155,33 +183,63 @@
 
   // ---------- Отрисовка ----------
   function render() {
-    const body = view === 'today' ? viewToday() : view === 'train' ? viewTrain() : view === 'food' ? viewFood() : viewProgress();
+    const body = view === 'today' ? viewToday() : view === 'train' ? viewTrain() : view === 'plan' ? viewPlan() : view === 'food' ? viewFood() : viewProgress();
     $('#main').innerHTML = body;
     $('#sheetroot').innerHTML = sheetHtml();
     document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.id === view));
+    animate();
+  }
+
+  // Плавные переходы: полосы, кольцо и число идут от прежнего значения к новому
+  function animate() {
+    const main = $('#main');
+    main.classList.remove('enter');
+    if (enter) { void main.offsetWidth; main.classList.add('enter'); }
+    enter = false;
+    const sr = $('#sheetroot'); sr.classList.toggle('anim', sheetNew); sheetNew = false;
+    main.querySelectorAll('.bar i').forEach((el, i) => {
+      const k = view + ':b' + i, to = el.style.width, from = prev[k] !== undefined ? prev[k] : '0%';
+      el.style.transition = 'none'; el.style.width = from; void el.offsetWidth; el.style.transition = ''; el.style.width = to; prev[k] = to;
+    });
+    const ring = main.querySelector('.rfg');
+    if (ring) {
+      const to = parseFloat(ring.getAttribute('stroke-dashoffset')), k = 'ring', from = prev[k] !== undefined ? prev[k] : parseFloat(ring.getAttribute('stroke-dasharray'));
+      ring.style.transition = 'none'; ring.style.strokeDashoffset = from; void ring.getBoundingClientRect(); ring.style.transition = ''; ring.style.strokeDashoffset = to; prev[k] = to;
+    }
+    const big = main.querySelector('.big');
+    if (big && big.firstChild) {
+      const to = parseInt(big.firstChild.nodeValue, 10), from = prev.big !== undefined ? prev.big : 0, t0 = performance.now();
+      prev.big = to;
+      if (from !== to) { const step = (t) => { const p = Math.min(1, (t - t0) / 600), e = 1 - Math.pow(1 - p, 3); if (big.firstChild) big.firstChild.nodeValue = Math.round(from + (to - from) * e); if (p < 1) requestAnimationFrame(step); }; requestAnimationFrame(step); }
+    }
+    if (popKey) { const q = popKey.split(':'); if (q[0] === 'all') main.querySelectorAll('.chk.on[data-id="' + q[1] + '"]').forEach((b) => b.classList.add('pop')); else { const b = main.querySelector('.chk[data-id="' + q[0] + '"][data-i="' + q[1] + '"]'); if (b) b.classList.add('pop'); } popKey = null; }
   }
 
   const num = (id) => { const el = $(id); if (!el) return NaN; const v = parseFloat(String(el.value).replace(',', '.')); return v; };
 
   function ensureEx(id) { const L = log(); L.ex = L.ex || {}; const ex = C.EXERCISES[id]; if (!L.ex[id]) L.ex[id] = { rir: 2, sets: Array(ex.sets).fill(0) }; while (L.ex[id].sets.length < ex.sets) L.ex[id].sets.push(0); return L.ex[id]; }
+  function lock() { if (S.plan[date] === undefined) S.plan[date] = C.workoutOf(S, date); }
   function defReps(id, i) { const last = C.lastSets(S, id, date); return (last && last.sets[i]) || C.EXERCISES[id].reps[0]; }
 
   const actions = {
-    tab(el) { view = el.dataset.id; window.scrollTo(0, 0); },
+    tab(el) { scrollY[view] = window.scrollY; view = el.dataset.id; },
     day(el) { const n = C.addDays(date, +el.dataset.d); if (n <= TODAY) date = n; },
-    wo(el) { const L = log(); L.workout = el.dataset.id; },
-    set(el) { const id = el.dataset.id, i = +el.dataset.i; const e = ensureEx(id); log().workout = log().workout !== undefined ? log().workout : workoutOf(date); e.sets[i] = e.sets[i] > 0 ? 0 : defReps(id, i); },
-    rep(el) { const id = el.dataset.id, i = +el.dataset.i, d = +el.dataset.d; const e = ensureEx(id); const cur = e.sets[i] > 0 ? e.sets[i] : defReps(id, i); e.sets[i] = Math.max(1, cur + d); if (log().workout === undefined) log().workout = workoutOf(date); },
+    wo(el) { S.plan[date] = el.dataset.id; },
+    plan(el) { S.plan[el.dataset.id] = el.dataset.v; },
+    set(el) { const id = el.dataset.id, i = +el.dataset.i; const e = ensureEx(id); lock(); e.sets[i] = e.sets[i] > 0 ? 0 : defReps(id, i); if (e.sets[i] > 0) popKey = id + ':' + i; },
+    rep(el) { const id = el.dataset.id, i = +el.dataset.i, d = +el.dataset.d; const e = ensureEx(id); const cur = e.sets[i] > 0 ? e.sets[i] : defReps(id, i); e.sets[i] = Math.max(1, cur + d); lock(); },
     rir(el) { ensureEx(el.dataset.id).rir = +el.dataset.v; },
+    rest(el) { const e = ensureEx(el.dataset.id), v = +el.dataset.v; e.rest = e.rest === v ? 0 : v; },
+    all(el) { const id = el.dataset.id, ex = C.EXERCISES[id], e = ensureEx(id); const full = e.sets.slice(0, ex.sets).every((x) => x > 0); for (let i = 0; i < ex.sets; i++) e.sets[i] = full ? 0 : (e.sets[i] > 0 ? e.sets[i] : defReps(id, i)); lock(); if (!full) popKey = 'all:' + id; },
     sleep(el) { const L = log(); const cur = L.sleep > 0 ? L.sleep : 7; const n = Math.round((cur + 0.25 * +el.dataset.d) * 4) / 4; L.sleep = Math.max(0, Math.min(14, L.sleep > 0 ? n : 7.5)); },
     weight(el) { const L = log(); const base = L.weight > 0 ? L.weight : (C.weightOn(S, date) || S.profile.weight); L.weight = Math.round((L.weight > 0 ? base + 0.1 * +el.dataset.d : base) * 10) / 10; },
-    pick(el) { sheet = { type: 'food', i: +el.dataset.i, qty: 1 }; },
+    pick(el) { sheetNew = true; sheet = { type: 'food', i: +el.dataset.i, qty: 1 }; },
     qty(el) { sheet.qty = Math.max(0.25, Math.round((sheet.qty + 0.25 * +el.dataset.d) * 100) / 100); },
     close() { sheet = null; },
     addfood() { const f = S.foods[sheet.i], q = sheet.qty; const L = log(); L.food = L.food || []; L.food.push({ name: f.name + (q !== 1 ? ' ×' + q : ''), kcal: f.kcal * q, p: f.p * q, c: f.c * q, f: f.f * q }); sheet = null; },
     delpreset() { S.foods.splice(sheet.i, 1); sheet = null; },
     delfood(el) { log().food.splice(+el.dataset.i, 1); },
-    custom() { sheet = { type: 'custom' }; },
+    custom() { sheetNew = true; sheet = { type: 'custom' }; },
     addcustom() {
       const name = ($('#c_name').value || '').trim() || 'Блюдо';
       const it = { name, kcal: num('#c_kcal') || 0, p: num('#c_p') || 0, c: num('#c_c') || 0, f: num('#c_f') || 0 };
@@ -207,10 +265,12 @@
     const el = ev.target.closest('[data-a]');
     if (!el || el.disabled) return;
     const keep = $('#io') && ev.target.closest('[data-a="export"]');
+    if (['tab', 'day', 'wo'].includes(el.dataset.a)) enter = true;
     const r = actions[el.dataset.a] && actions[el.dataset.a](el);
     save();
     if (keep) { render(); $('#io').value = JSON.stringify(S); return; }
     if (r !== false) render();
+    if (el.dataset.a === 'tab') window.scrollTo(0, scrollY[view] || 0);
   });
   document.addEventListener('change', (ev) => {
     const k = ev.target.dataset && ev.target.dataset.prof;
@@ -221,6 +281,11 @@
   });
   document.addEventListener('DOMContentLoaded', () => { render(); });
   if (document.readyState !== 'loading') render();
+
+  function checkDay() { const n = C.dstr(new Date()); if (n !== TODAY) { if (date === TODAY) date = n; TODAY = n; return true; } return false; }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { checkDay(); render(); } });
+  window.addEventListener('pageshow', () => { checkDay(); render(); });
+  setInterval(() => { if (checkDay()) render(); }, 60000);
 
   if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch(() => {});
 })();

@@ -52,6 +52,7 @@
       v: 1,
       profile: { weight: 88, height: 195, age: 20, tdee: 3000, level: 0.9, share: 0.45, proteinPerKg: 1.6 },
       schedule: { 1: 'A', 3: 'B', 5: 'C' },
+      plan: {},
       logs: {},
       foods: [
         { name: 'Куриная грудка', unit: '100 г', kcal: 165, p: 31, c: 0, f: 3.6 },
@@ -74,32 +75,54 @@
   const quality = (rir) => (rir == null ? 1 : rir <= 3 ? 1 : rir <= 5 ? 0.5 : 0);
   const f = (s) => 1 - Math.exp(-s / 6);
 
-  // Число «рабочих подходов» по группам за 7 дней, заканчивая датой date
-  function groupSets(state, date) {
-    const out = {};
-    for (const g in GROUPS) out[g] = 0;
-    for (let i = 0; i < 7; i++) {
-      const log = state.logs[addDays(date, -i)];
-      if (!log || !log.ex) continue;
-      for (const id in log.ex) {
-        const ex = EXERCISES[id];
-        if (!ex) continue;
-        const e = log.ex[id];
-        const q = quality(e.rir == null ? 2 : e.rir);
-        const done = (e.sets || []).filter((r) => r > 0).length;
-        for (const g in ex.g) out[g] += done * q * ex.g[g];
-      }
+  // Отдых между подходами: слишком короткий — меньше повторов в следующих подходах (эвристика)
+  const COMPOUND = new Set(['pullup_band', 'chinup', 'pullup_wide', 'dips', 'dips_tri', 'pushup_feet', 'pike_pushup']);
+  const restFactor = (id, sec) => { if (!(sec > 0)) return 1; const ideal = COMPOUND.has(id) ? 120 : 60; return 0.8 + 0.2 * Math.min(1, sec / ideal); };
+
+  // Зачётные подходы за один день по группам (запас повторов × отдых)
+  function dayRaw(state, d) {
+    const out = {}; for (const g in GROUPS) out[g] = 0;
+    const log = state.logs[d]; if (!log || !log.ex) return out;
+    for (const id in log.ex) {
+      const ex = EXERCISES[id]; if (!ex) continue;
+      const e = log.ex[id];
+      const q = quality(e.rir == null ? 2 : e.rir) * restFactor(id, e.rest);
+      const done = (e.sets || []).filter((r) => r > 0).length;
+      for (const g in ex.g) out[g] += done * q * ex.g[g];
     }
     return out;
   }
+  // Убывающая отдача внутри одной тренировки: после ~8 подходов на группу каждый следующий вдвое слабее
+  const dim = (s) => (s <= 8 ? s : 8 + 0.5 * (s - 8));
+  // Если ту же группу тренировали накануне, подходы засчитываются хуже (до −30%)
+  const RECOVERY_MAX = 0.3;
+
+  function windowSets(state, date) {
+    const sets = {}, noRec = {};
+    for (const g in GROUPS) { sets[g] = 0; noRec[g] = 0; }
+    for (let i = 0; i < 7; i++) {
+      const d = addDays(date, -i), raw = dayRaw(state, d), prev = dayRaw(state, addDays(d, -1));
+      for (const g in GROUPS) {
+        if (raw[g] <= 0) continue;
+        const p = Math.min(1, prev[g] / 6);
+        noRec[g] += dim(raw[g]);
+        sets[g] += dim(raw[g] * (1 - RECOVERY_MAX * p));
+      }
+    }
+    return { sets, noRec };
+  }
+  const groupSets = (state, date) => windowSets(state, date).sets;
 
   const rawT = (sets) => { let t = 0; for (const g in GROUPS) t += GROUPS[g].w * f(sets[g] || 0); return t; };
 
   // Объём «идеального» плана (все подходы, RIR 2) за неделю — точка отсчёта 100%
   function planSets() {
-    const out = {};
-    for (const g in GROUPS) out[g] = 0;
-    for (const k in PLAN) for (const id of PLAN[k].ex) { const ex = EXERCISES[id]; for (const g in ex.g) out[g] += ex.sets * ex.g[g]; }
+    const out = {}; for (const g in GROUPS) out[g] = 0;
+    for (const k in PLAN) {
+      const s = {}; for (const g in GROUPS) s[g] = 0;
+      for (const id of PLAN[k].ex) { const ex = EXERCISES[id]; for (const g in ex.g) s[g] += ex.sets * ex.g[g]; }
+      for (const g in GROUPS) out[g] += dim(s[g]);
+    }
     return out;
   }
   const PLAN_SETS = planSets();
@@ -114,7 +137,7 @@
 
   function energyScore(surplus) {
     const s = surplus;
-    if (s <= -0.2) return 0.4;
+    if (s <= -0.2) return Math.max(0.05, 0.4 * (1 + s) / 0.8);
     if (s < 0) return 0.4 + 0.45 * (s + 0.2) / 0.2;
     if (s < 0.05) return 0.85 + 0.15 * (s / 0.05);
     if (s <= 0.15) return 1;
@@ -140,9 +163,12 @@
   function computeDay(state, date) {
     const pr = state.profile;
     const Gmax = gmax(pr);
-    const sets = groupSets(state, date);
-    const Traw = rawT(sets);
-    const T = Math.min(1, Traw / TPLAN);
+    const W = windowSets(state, date);
+    const sets = W.sets;
+    const Traw = rawT(sets), Traw0 = rawT(W.noRec);
+    let sr = 0, s0 = 0; for (const g in GROUPS) { sr += GROUPS[g].w * W.sets[g]; s0 += GROUPS[g].w * W.noRec[g]; }
+    const R = s0 > 0 ? sr / s0 : 1; // восстановление: доля подходов, засчитанных после учёта предыдущего дня
+    const T = Math.min(1, Traw0 / TPLAN) * R;
 
     const ft = foodTotals(state, date);
     const missing = [];
@@ -171,6 +197,8 @@
     const dec = declining(state, date);
     if (dec.length) risks.push('Повторы падают в последних тренировках: ' + dec.map((id) => EXERCISES[id].name).join(', ') + ' — подумайте о разгрузочной неделе (половина подходов)');
 
+    if (R < 0.95) risks.push('Тренировки идут слишком плотно: одни и те же мышцы не успевают восстановиться (−' + Math.round((1 - R) * 100) + '% к зачёту подходов)');
+
     // Что ограничивает прирост
     const lim = [];
     const gain = (T2, P2, E2, S2) => Gmax * T2 * Math.pow(P2, 0.4) * Math.pow(E2, 0.3) * Math.pow(S2, 0.3) - M;
@@ -178,10 +206,11 @@
     if (P < 0.999) lim.push({ key: 'protein', gain: gain(T, 1, E, S), text: ft.n ? 'Добрать белок до ' + Math.round(pr.proteinPerKg * pr.weight) + ' г' : 'Внести питание за день' });
     if (E < 0.999) lim.push({ key: 'energy', gain: gain(T, P, 1, S), text: ft.n ? (surplus < 0.05 ? 'Добавить калории: цель около ' + Math.round(pr.tdee * 1.08) + ' ккал' : 'Профицит великоват — часть уйдёт в жир') : 'Внести питание за день' });
     if (S < 0.999) lim.push({ key: 'sleep', gain: gain(T, P, E, 1), text: si.S == null ? 'Внести сон' : 'Спать 7,5 ч и больше' });
+    if (R < 0.97) lim.push({ key: 'recovery', gain: Gmax * (T / R) * Q - M, text: 'Давать мышцам около 48 часов между тренировками' });
     lim.sort((a, b) => b.gain - a.gain);
 
     const tokens = M - pen;
-    return { Gmax, sets, Traw, T, P, E, S, R: 1, Q, M, opt: Gmax ? (M / Gmax) * 100 : 0, pen, tokens, surplus, food: ft, sleep: si, missing, limiters: lim.filter((l) => l.gain > 0.05), risks };
+    return { Gmax, sets, Traw, T, P, E, S, R, setsEff: total, setsPlan: planTotal, Q, M, opt: Gmax ? (M / Gmax) * 100 : 0, pen, tokens, surplus, food: ft, sleep: si, missing, limiters: lim.filter((l) => l.gain > 0.05), risks };
   }
 
   function weeklyTokens(state, date) {
@@ -213,5 +242,46 @@
     return null;
   }
 
-  return { GROUPS, EXERCISES, PLAN, PLAN_SETS, TPLAN, defaultState, computeDay, weeklyTokens, declining, lastSets, exerciseSessions, groupSets, foodTotals, energyScore, sleepOne, sleepInfo, quality, gmax, weightOn, dstr, parse, addDays, weekday };
+  // Что запланировано на дату: выбор пользователя > отметка в журнале > расписание по умолчанию
+  function workoutOf(state, d) {
+    if (state.plan && state.plan[d] !== undefined) return state.plan[d];
+    const l = state.logs[d];
+    if (l && l.workout !== undefined) return l.workout;
+    return (state.schedule || {})[weekday(d)] || '';
+  }
+
+  function assumptions(state, from) {
+    const pr = state.profile; let k = 0, p = 0, nf = 0, sl = 0, ns = 0;
+    for (let i = 1; i <= 7; i++) {
+      const d = addDays(from, -i), ft = foodTotals(state, d), h = (state.logs[d] || {}).sleep;
+      if (ft.n) { k += ft.kcal; p += ft.p; nf++; }
+      if (h > 0) { sl += h; ns++; }
+    }
+    return { kcal: nf ? k / nf : pr.tdee * 1.08, p: nf ? p / nf : pr.proteinPerKg * pr.weight, sleep: ns ? sl / ns : 7.5, hasFood: nf > 0, hasSleep: ns > 0 };
+  }
+
+  // Прогноз токенов на n дней вперёд: планы дней выполнены полностью (RIR 2), питание и сон — как в среднем за неделю
+  function projectWeek(state, from, n) {
+    n = n || 7;
+    const A = assumptions(state, from);
+    const st = Object.assign({}, state, { logs: Object.assign({}, state.logs) });
+    const dates = [];
+    for (let i = 0; i < n; i++) {
+      const d = addDays(from, i); dates.push(d);
+      const real = state.logs[d] || {}, log = Object.assign({}, real), wo = workoutOf(state, d);
+      const hasSets = real.ex && Object.values(real.ex).some((e) => (e.sets || []).some((r) => r > 0));
+      if (!hasSets) {
+        delete log.ex;
+        if (wo && PLAN[wo]) { log.ex = {}; for (const id of PLAN[wo].ex) { const ex = EXERCISES[id]; log.ex[id] = { rir: 2, sets: Array(ex.sets).fill(Math.round((ex.reps[0] + ex.reps[1]) / 2)) }; } }
+      }
+      const ft = foodTotals(state, d);
+      if (i === 0 && ft.n) { if (ft.kcal < A.kcal || ft.p < A.p) log.food = [{ name: 'прогноз', kcal: Math.max(ft.kcal, A.kcal), p: Math.max(ft.p, A.p), c: 0, f: 0 }]; }
+      else if (!ft.n) log.food = [{ name: 'прогноз', kcal: A.kcal, p: A.p, c: 0, f: 0 }];
+      if (!(log.sleep > 0)) log.sleep = A.sleep;
+      st.logs[d] = log;
+    }
+    return { days: dates.map((d) => ({ date: d, wo: workoutOf(state, d), r: computeDay(st, d) })), assumed: A };
+  }
+
+  return { restFactor, workoutOf, projectWeek, windowSets, dayRaw, GROUPS, EXERCISES, PLAN, PLAN_SETS, TPLAN, defaultState, computeDay, weeklyTokens, declining, lastSets, exerciseSessions, groupSets, foodTotals, energyScore, sleepOne, sleepInfo, quality, gmax, weightOn, dstr, parse, addDays, weekday };
 });
