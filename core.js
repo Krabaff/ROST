@@ -282,6 +282,13 @@
         comp = cf * ff; E = Eraw * comp;
       }
     }
+    // Пока внесена лишь малая часть дневной еды (идёт день), питание не обнуляет оценку:
+    // плавный переход от «нет данных» (0,5) к фактическим значениям, когда внесено ~35% цели
+    let fill = 1;
+    if (ft.n > 0) {
+      fill = Math.min(1, Math.max(ft.kcal / tg.kcal, ft.p / (pr.proteinPerKg * pr.weight)) / 0.35);
+      P = fill * P + (1 - fill) * 0.5; E = fill * E + (1 - fill) * 0.5;
+    }
     const si = sleepInfo(state, date);
     let S = si.S;
     if (S == null) { S = 0.5; missing.push('sleep'); }
@@ -295,7 +302,7 @@
     let pen = 0; const risks = [];
     if (total > 1.4 * planTotal) { const k = Math.min(2, (total / planTotal - 1.4) * 5); pen += k; risks.push('Объём за неделю заметно выше плана — риск перетренированности'); }
     if (si.mean != null && si.mean < 5.5) { pen += 1; risks.push('Средний сон за неделю меньше 5,5 ч'); }
-    if (surplus != null && surplus < -0.2 && T > 0.3) { pen += 0.5; risks.push('Глубокий дефицит калорий при тренировках'); }
+    if (surplus != null && fill >= 1 && surplus < -0.2 && T > 0.3) { pen += 0.5; risks.push('Глубокий дефицит калорий при тренировках'); }
     pen = Math.min(3, pen);
     const dec = declining(state, date);
     if (dec.length) risks.push('Повторы падают в последних тренировках: ' + dec.map((id) => EXERCISES[id].name).join(', ') + ' — подумайте о разгрузочной неделе (половина подходов)');
@@ -333,7 +340,7 @@
     lim.sort((a, b) => b.gain - a.gain);
 
     const tokens = M - pen;
-    return { Gmax, sets, Traw, T, P, E, S, R, setsEff: total, setsPlan: planTotal, Q, M, opt: Gmax ? (M / Gmax) * 100 : 0, pen, tokens, surplus, tg, comp, rest: !tg.train, next: tg.train ? null : nextWorkout(state, date), food: ft, sleep: si, missing, limiters: lim.filter((l) => l.gain > 0.05), risks };
+    return { fill, Gmax, sets, Traw, T, P, E, S, R, setsEff: total, setsPlan: planTotal, Q, M, opt: Gmax ? (M / Gmax) * 100 : 0, pen, tokens, surplus, tg, comp, rest: !tg.train, next: tg.train ? null : nextWorkout(state, date), food: ft, sleep: si, missing, limiters: lim.filter((l) => l.gain > 0.05), risks };
   }
 
   function weeklyTokens(state, date) {
