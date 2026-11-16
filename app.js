@@ -207,6 +207,7 @@
     const mrow = (name, v, t, min, max) => '<div class="row"><span>' + name + (min != null ? '<small>норма ' + min + '–' + max + ' г</small>' : '') + '</span><b>' + r0(v) + ' / ' + t + ' г</b></div>' + bar(v / t, max != null && v > max ? 'warn' : '');
     h += '<div class="card"><div class="row"><span>Калории<small>' + (tg.train ? 'день тренировки' : 'день отдыха') + ' · расход ≈ ' + tg.tdee + '</small></span><b>' + r0(ft.kcal) + ' / ' + kT + '</b></div>' + bar(ft.kcal / kT) + mrow('Белок', ft.p, pT, null, null) + mrow('Углеводы', ft.c, tg.carb, tg.carbMin, tg.carbMax) + mrow('Жиры', ft.f, tg.fat, tg.fatMin, tg.fatMax) + '<p class="mut small">Цель по калориям зависит от дня: в день тренировки выше, в день отдыха ниже. Углеводы — остаток калорий после белка и жиров.</p></div>';
     const items = L.food || [];
+    if (undoStack.length) h += '<button class="btn ghost" data-a="undo">↶ Отменить последнее изменение еды (' + undoStack.length + ')</button>';
     if (items.length) h += '<div class="card"><h3>Съедено</h3>' + items.map((it, i) => '<div class="row item"><span>' + esc(it.name) + '<small>' + r0(it.kcal) + ' ккал · Б ' + r0(it.p) + ' · У ' + r0(it.c) + ' · Ж ' + r0(it.f) + '</small></span><button class="x" data-a="delfood" data-i="' + i + '" aria-label="Удалить">×</button></div>').join('') + '</div>';
     if (items.length) h += '<button class="btn ghost" data-a="savetplopen">Сохранить съеденное как шаблон</button>';
     const yf = (S.logs[C.addDays(date, -1)] || {}).food;
@@ -265,7 +266,7 @@
     const tdeeHtml = te ? '<div class="note">По вашему весу и питанию за ' + te.days + ' дн. расход ≈ <b>' + te.tdee + ' ккал</b> (вес ' + (te.perWeek >= 0 ? '+' : '−') + r1(Math.abs(te.perWeek)) + ' кг/нед). <button class="lnk" data-a="applytdee" data-v="' + te.tdee + '">Применить</button></div>' : '';
     h += '<div class="card"><h3>Профиль</h3>' + [['weight', 'Вес, кг', pr.weight], ['tdee', 'Расход калорий, ккал', pr.tdee], ['level', 'Потенциал, % массы в месяц', pr.level], ['proteinPerKg', 'Белок, г на кг', pr.proteinPerKg], ['fatPerKg', 'Жиры, г на кг', pr.fatPerKg], ['trainKcal', 'Доп. расход в день тренировки, ккал', pr.trainKcal]].map(([k, n, v]) => '<label class="pf">' + n + '<input data-prof="' + k + '" inputmode="decimal" value="' + v + '"></label>').join('') + tdeeHtml + '<p class="mut small">Расход калорий — средний за неделю с тремя тренировками: в день тренировки цель выше, в день отдыха ниже. Подберите его по динамике веса: если вес за 2–3 недели не меняется при вашем питании, это и есть ваш расход.</p></div>';
     h += '<div class="card"><h3>Как читать токены</h3><p class="mut">Токен = условный грамм мышечной массы в день при вашем уровне. 100% — план выполнен полностью, белок и калории в норме, сон от 7,5 ч. Модель учитывает объём тренинга (с поправками на запас повторов, отдых между подходами, убывающую отдачу и восстановление между тренировками), белок, энергетический баланс и сон, но это оценка, а не измерение. Через 8–12 недель сравните сумму токенов с реальной динамикой замеров и подправьте «Потенциал» в профиле.</p></div>';
-    h += '<div class="card"><h3>Интерфейс</h3><div class="btns"><button class="btn" data-a="undo" ' + (undoStack.length ? '' : 'disabled') + '>Отменить действие' + (undoStack.length ? ' (' + undoStack.length + ')' : '') + '</button><button class="btn" data-a="haptoggle">Вибро-отклик: ' + (S.meta.nohaptic ? 'выкл' : 'вкл') + '</button></div></div>';
+    h += '<div class="card"><h3>Интерфейс</h3><div class="btns"><button class="btn" data-a="haptoggle">Вибро-отклик: ' + (S.meta.nohaptic ? 'выкл' : 'вкл') + '</button></div></div>';
     h += '<div class="card"><h3>Данные</h3><div class="btns"><button class="btn" data-a="export">Экспорт</button><button class="btn" data-a="import">Импорт</button></div><p class="mut small">Данные хранятся только в браузере этого телефона. Делайте экспорт раз в пару недель.</p><textarea id="io" class="io" placeholder="Сюда попадёт копия данных или вставьте её для импорта"></textarea></div>';
     return h;
   }
@@ -319,10 +320,35 @@
   }
 
   // ---------- Отрисовка ----------
-  function render() {
+  // Ввод в шторках запоминается: переживает сворачивание приложения и перезагрузку страницы
+  const DRAFT = 'gymapp.draft', DRAFT_TYPES = ['custom', 'quick', 'savetpl'];
+  let fields = {}, fieldsOwner = null;
+  function writeDraft() {
+    try {
+      if (sheet && DRAFT_TYPES.includes(sheet.type)) localStorage.setItem(DRAFT, JSON.stringify({ sheet, fields, date, t: Date.now() }));
+      else localStorage.removeItem(DRAFT);
+    } catch (e) { /* хранилище недоступно */ }
+  }
+  function readFields() { document.querySelectorAll('#sheetroot input[id]').forEach((el) => { fields[el.id] = el.type === 'checkbox' ? el.checked : el.value; }); }
+  function applyFields() { for (const id in fields) { const el = document.getElementById(id); if (el && el.closest('#sheetroot')) { if (el.type === 'checkbox') el.checked = !!fields[id]; else el.value = fields[id]; } } }
+  document.addEventListener('input', (ev) => { if (ev.target.closest && ev.target.closest('#sheetroot')) { readFields(); writeDraft(); } });
+  document.addEventListener('change', (ev) => { if (ev.target.closest && ev.target.closest('#sheetroot')) { readFields(); writeDraft(); } });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { readFields(); writeDraft(); } });
+  function restoreDraft() {
+    try {
+      const d = JSON.parse(localStorage.getItem(DRAFT) || 'null');
+      if (d && d.sheet && DRAFT_TYPES.includes(d.sheet.type) && Date.now() - d.t < 12 * 3600 * 1000) { sheet = d.sheet; fields = d.fields || {}; fieldsOwner = sheet; if (d.date) date = d.date; return true; }
+      localStorage.removeItem(DRAFT);
+    } catch (e) { /* повреждённый черновик */ }
+    return false;
+  }
+  function render(restore) {
     const body = view === 'today' ? viewToday() : view === 'train' ? viewTrain() : view === 'plan' ? viewPlan() : view === 'food' ? viewFood() : viewProgress();
     $('#main').innerHTML = body;
+    if (!sheet) { fields = {}; fieldsOwner = null; } else if (sheet !== fieldsOwner) { if (restore !== true) fields = {}; fieldsOwner = sheet; }
     $('#sheetroot').innerHTML = sheetHtml();
+    if (restore === true && sheet) applyFields();
+    if (!restore || !sheet) writeDraft();
     if (!(sheet && sheet.type === 'scan')) { if (cam || camStarting) stopScan(); }
     else if (cam) { const v = $('#cam'); if (v && cam.v !== v) { v.srcObject = cam.stream; v.play().catch(() => {}); cam.v = v; } }
     else setTimeout(startScan, 0);
@@ -532,7 +558,11 @@
       sheet = null; toast('Добавлено');
     },
     summaryopen() { sheetNew = true; sheet = { type: 'summary' }; },
-    undo() { const snap = undoStack.pop(); if (!snap) { toast('Нечего отменять'); return false; } S = JSON.parse(snap); sheet = null; toast(undoStack.length ? 'Отменено · ещё ' + undoStack.length : 'Отменено'); },
+    undo() {
+      const u = undoStack.pop(); if (!u) { toast('Нечего отменять'); return false; }
+      const L = (S.logs[u.d] = S.logs[u.d] || {}); L.food = JSON.parse(u.food); sheet = null;
+      toast(undoStack.length ? 'Отменено · ещё ' + undoStack.length : 'Отменено');
+    },
     haptoggle() { S.meta.nohaptic = !S.meta.nohaptic; toast(S.meta.nohaptic ? 'Вибро-отклик выключен' : 'Вибро-отклик включен'); },
     timerstop() { timer = null; drawTimer(); },
     timeradd() { if (timer) { timer.end += 30000; beeped = false; } drawTimer(); },
@@ -584,10 +614,9 @@
     },
   };
 
+  // Отмена — только для списка «Съедено» (хранится прежнее содержимое списка за день)
   const undoStack = [];
-  let lastKey = '', lastAt = 0;
-  const LABEL = { set: 'Подход изменён', rep: 'Повторы изменены', all: 'Упражнение отмечено', rir: 'Запас изменён', rest: 'Отдых изменён', sleep: 'Сон изменён', weight: 'Вес изменён', delfood: 'Блюдо удалено', addfood: 'Блюдо добавлено', addcustom: 'Блюдо добавлено', addquick: 'Добавлено', addmeal: 'Добавлено', bcadd: 'Добавлено', wo: 'План дня изменён', plan: 'План изменён', delmeas: 'Замер удалён', addmeas: 'Замер добавлен', delmeal: 'Шаблон удалён', delpreset: 'Продукт удалён', copyfood: 'Питание скопировано', startdeload: 'Разгрузка началась', enddeload: 'Разгрузка закончена', flag: 'Отметка изменена', pain: 'Отметка изменена', saveschedule: 'Расписание сохранено', applytdee: 'Расход обновлён', applylevel: 'Потенциал обновлён', savetpl: 'Шаблон сохранён', import: 'Данные загружены' };
-  const COALESCE = new Set(['rep', 'sleep', 'weight', 'rir', 'rest']);
+  const FOODLABEL = { delfood: 'Блюдо удалено', addfood: 'Блюдо добавлено', addcustom: 'Блюдо добавлено', addquick: 'Добавлено', addmeal: 'Шаблон добавлен', bcadd: 'Добавлено', copyfood: 'Питание скопировано' };
   function haptic() {
     if (S.meta.nohaptic) return;
     try {
@@ -603,14 +632,11 @@
     const keep = $('#io') && ev.target.closest('[data-a="export"]');
     if (['tab', 'day', 'wo'].includes(a)) enter = true;
     if (a !== 'tab') haptic();
-    const pre = JSON.stringify(S); tmsg = null;
+    const d0 = date, pre = JSON.stringify((S.logs[d0] || {}).food || []); tmsg = null;
     const r = actions[a] && actions[a](el);
-    if (a !== 'undo' && a !== 'export' && JSON.stringify(S) !== pre) {
-      const key = a + ':' + (el.dataset.id || '') + ':' + (el.dataset.i || '') + ':' + (el.dataset.d || '');
-      const same = COALESCE.has(a) && key.split(':').slice(0, 3).join(':') === lastKey && Date.now() - lastAt < 2000;
-      if (!same) { undoStack.push(pre); if (undoStack.length > 40) undoStack.shift(); }
-      lastKey = key.split(':').slice(0, 3).join(':'); lastAt = Date.now();
-      if (sheet && sheet.type === 'summary') { /* поверх итога тост не показываем */ } else if (a === 'set' || a === 'all' || a === 'rep' || COALESCE.has(a) || LABEL[a] || tmsg) toast(tmsg || LABEL[a] || 'Изменено', true);
+    if (a !== 'undo' && JSON.stringify((S.logs[d0] || {}).food || []) !== pre) {
+      undoStack.push({ d: d0, food: pre }); if (undoStack.length > 30) undoStack.shift();
+      toast(FOODLABEL[a] || tmsg || 'Список изменён', true);
     }
     save();
     if (keep) { render(); $('#io').value = JSON.stringify(S); return; }
@@ -680,12 +706,12 @@
     if (v > 0) { S.profile[k] = v; save(); }
     render();
   });
-  document.addEventListener('DOMContentLoaded', () => { render(); });
-  if (document.readyState !== 'loading') render();
+  document.addEventListener('DOMContentLoaded', () => { restoreDraft(); render(true); });
+  if (document.readyState !== 'loading') { restoreDraft(); render(true); }
 
   function checkDay() { const n = C.dstr(new Date()); if (n !== TODAY) { if (date === TODAY) date = n; TODAY = n; return true; } return false; }
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) { checkDay(); render(); } });
-  window.addEventListener('pageshow', () => { checkDay(); render(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { checkDay(); render(true); } });
+  window.addEventListener('pageshow', () => { checkDay(); render(true); });
   setInterval(() => { if (checkDay()) render(); }, 60000);
 
   if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch(() => {});

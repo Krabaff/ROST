@@ -249,9 +249,9 @@
     if (!first || first <= addDays(date, -6)) return TPLAN;
     const perWeek = Math.max(1, Object.keys(state.schedule || {}).length);
     let sessions = 0;
-    for (let d = first; d <= date; d = addDays(d, 1)) { const raw = dayRaw(state, d); if ((state.schedule && state.schedule[weekday(d)]) || Object.values(raw).some((v) => v > 0)) sessions++; }
+    for (let d = first; d <= date; d = addDays(d, 1)) { const raw = dayRaw(state, d); if (workoutOf(state, d) || Object.values(raw).some((v) => v > 0)) sessions++; }
     const ratio = Math.min(1, sessions / perWeek);
-    if (ratio >= 1) return TPLAN;
+    if (ratio >= 1 || sessions === 0) return TPLAN;
     const sc = {}; for (const g in GROUPS) sc[g] = PLAN_SETS[g] * ratio;
     return rawT(sc);
   }
